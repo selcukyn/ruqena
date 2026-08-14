@@ -5,14 +5,23 @@ import { Bell, CheckCheck, Flame, Trophy, UserPlus, Heart, Award, Smartphone } f
 import { dataService } from '@/lib/dataService'
 import { AppNotification } from '@/types/database'
 
+import { useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    dataService.getNotifications()
-  )
+  const { user } = useAuth()
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [pushEnabled, setPushEnabled] = useState(false)
 
-  const handleMarkAllRead = () => {
-    dataService.markAllNotificationsAsRead()
+  useEffect(() => {
+    if (user?.id) {
+      dataService.getNotifications(user.id).then(setNotifications)
+    }
+  }, [user?.id])
+
+  const handleMarkAllRead = async () => {
+    if (!user) return
+    await dataService.markAllNotificationsAsRead(user.id)
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
   }
 

@@ -10,7 +10,7 @@ export default function ChallengesPage() {
   const [challenges, setChallenges] = useState<EnrichedChallenge[]>([])
 
   useEffect(() => {
-    setChallenges(dataService.getChallenges())
+    dataService.getChallenges().then(setChallenges)
   }, [])
 
   return (

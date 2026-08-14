@@ -13,8 +13,11 @@ const AVATAR_OPTIONS = [
   'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
 ]
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function OnboardingPage() {
   const router = useRouter()
+  const { user } = useAuth()
   const [step, setStep] = useState(1)
 
   const [displayName, setDisplayName] = useState('Selçuk Yılmaz')
@@ -22,12 +25,13 @@ export default function OnboardingPage() {
   const [selectedAvatar, setSelectedAvatar] = useState(AVATAR_OPTIONS[0])
   const [weeklyGoal, setWeeklyGoal] = useState(4)
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 4) {
       setStep(step + 1)
     } else {
+      const userId = user?.id || 'usr_me'
       // Save profile updates
-      dataService.updateCurrentUserProfile({
+      await dataService.updateCurrentUserProfile(userId, {
         display_name: displayName,
         username,
         avatar_url: selectedAvatar,

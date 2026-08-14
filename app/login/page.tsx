@@ -5,8 +5,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Activity, ArrowRight, Lock, Mail } from 'lucide-react'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function LoginPage() {
   const router = useRouter()
+  const { signIn, isConfigured } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -17,11 +20,21 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    // Simulate authentication process
-    setTimeout(() => {
+    if (!isConfigured) {
+      // Offline / Unconfigured fallback
       setLoading(false)
       router.push('/home')
-    }, 600)
+      return
+    }
+
+    const { error: err } = await signIn(email, password)
+    if (err) {
+      setError(err.message || 'Giriş yapılırken bir hata oluştu.')
+      setLoading(false)
+    } else {
+      setLoading(false)
+      router.push('/home')
+    }
   }
 
   return (

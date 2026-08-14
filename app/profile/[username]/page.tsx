@@ -5,11 +5,46 @@ import { dataService } from '@/lib/dataService'
 import { WorkoutCard } from '@/components/feed/WorkoutCard'
 import { Flame, Trophy, Activity, Target, UserCheck, ShieldCheck } from 'lucide-react'
 
+import { useEffect, useState } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+import { Profile } from '@/types/database'
+import { EnrichedWorkout } from '@/types/app'
+
 export default function UserProfilePage() {
   const params = useParams()
   const username = params?.username as string
-  const profile = dataService.getProfileByUsername(username)
-  const me = dataService.getCurrentUser()
+  const { user } = useAuth()
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadData() {
+      if (!username) return
+      try {
+        const targetProf = await dataService.getProfileByUsername(username)
+        setProfile(targetProf)
+        if (targetProf) {
+          const w = await dataService.getUserWorkouts(targetProf.id)
+          setWorkouts(w)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadData()
+  }, [username])
+
+  if (loading) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Profil Yükleniyor...</p>
+      </div>
+    )
+  }
 
   if (!profile) {
     return (
@@ -20,8 +55,7 @@ export default function UserProfilePage() {
     )
   }
 
-  const workouts = dataService.getUserWorkouts(profile.id)
-  const isMe = me.id === profile.id
+  const isMe = user?.id === profile.id
 
   return (
     <div className="space-y-6">

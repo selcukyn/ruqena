@@ -5,17 +5,27 @@ import { useRouter } from 'next/navigation'
 import { Settings, Shield, Bell, LogOut, User, Moon, ChevronRight } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 
+import { useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function SettingsPage() {
   const router = useRouter()
-  const user = dataService.getCurrentUser()
-  const [bio, setBio] = useState(user.bio || '')
+  const { profile: user, signOut, refreshProfile } = useAuth()
+  const [bio, setBio] = useState(user?.bio || '')
 
-  const handleSaveBio = () => {
-    dataService.updateCurrentUserProfile({ bio })
+  useEffect(() => {
+    if (user?.bio) setBio(user.bio)
+  }, [user?.bio])
+
+  const handleSaveBio = async () => {
+    if (!user) return
+    await dataService.updateCurrentUserProfile(user.id, { bio })
+    await refreshProfile()
     alert('Profil güncellendi!')
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut()
     router.push('/login')
   }
 

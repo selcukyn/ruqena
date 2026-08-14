@@ -1,21 +1,42 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
 import { dataService } from '@/lib/dataService'
+import { EnrichedWorkout } from '@/types/app'
+import { Achievement } from '@/types/database'
 import { WorkoutCard } from '@/components/feed/WorkoutCard'
-import { Flame, Trophy, Activity, Settings, Award, Edit3, Check } from 'lucide-react'
+import { Flame, Activity, Award, Edit3 } from 'lucide-react'
 
 export default function CurrentUserProfilePage() {
-  const [user, setUser] = useState(dataService.getCurrentUser())
-  const workouts = dataService.getUserWorkouts(user.id)
-  const achievements = dataService.getAchievements()
+  const { profile: user, refreshProfile } = useAuth()
+  const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
+  const [achievements, setAchievements] = useState<Achievement[]>([])
   const [isEditingGoal, setIsEditingGoal] = useState(false)
-  const [newGoal, setNewGoal] = useState(user.weekly_goal)
+  const [newGoal, setNewGoal] = useState(3)
 
-  const handleSaveGoal = () => {
-    const updated = dataService.updateCurrentUserProfile({ weekly_goal: newGoal })
-    setUser(updated)
+  useEffect(() => {
+    if (user?.id) {
+      setNewGoal(user.weekly_goal || 3)
+      dataService.getUserWorkouts(user.id).then(setWorkouts)
+      dataService.getAchievements().then(setAchievements)
+    }
+  }, [user?.id, user?.weekly_goal])
+
+  const handleSaveGoal = async () => {
+    if (!user) return
+    await dataService.updateCurrentUserProfile(user.id, { weekly_goal: newGoal })
+    await refreshProfile()
     setIsEditingGoal(false)
+  }
+
+  if (!user) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Profil Yükleniyor...</p>
+      </div>
+    )
   }
 
   return (

@@ -10,16 +10,46 @@ import { WorkoutCard } from '@/components/feed/WorkoutCard'
 import { EmptyState } from '@/components/common/EmptyState'
 import { getMotivationalCopy } from '@/lib/gamification'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function HomePage() {
-  const [user, setUser] = useState<Profile | null>(null)
+  const { profile: user, loading: authLoading } = useAuth()
   const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
   const [challenges, setChallenges] = useState<EnrichedChallenge[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
 
   useEffect(() => {
-    setUser(dataService.getCurrentUser())
-    setWorkouts(dataService.getFeedWorkouts())
-    setChallenges(dataService.getChallenges())
+    let isMounted = true
+    async function loadData() {
+      try {
+        const [w, c] = await Promise.all([
+          dataService.getFeedWorkouts(),
+          dataService.getChallenges(),
+        ])
+        if (isMounted) {
+          setWorkouts(w)
+          setChallenges(c)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally {
+        if (isMounted) setDataLoading(false)
+      }
+    }
+    loadData()
+    return () => {
+      isMounted = false
+    }
   }, [])
+
+  if (authLoading || dataLoading) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Akış Yükleniyor...</p>
+      </div>
+    )
+  }
 
   if (!user) return null
 

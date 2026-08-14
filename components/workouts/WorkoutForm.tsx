@@ -27,8 +27,11 @@ const SAMPLE_PHOTOS = [
   { label: 'Yoga Akışı', url: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=800&auto=format&fit=crop&q=80' },
 ]
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export function WorkoutForm() {
   const router = useRouter()
+  const { user, profile } = useAuth()
   const [selectedType, setSelectedType] = useState<WorkoutType>('Running')
   const [duration, setDuration] = useState<number>(35)
   const [distance, setDistance] = useState<string>('5.0')
@@ -41,12 +44,14 @@ export function WorkoutForm() {
   const [loading, setLoading] = useState(false)
   const [successResult, setSuccessResult] = useState<{ xpEarned: number; streakExtended: boolean } | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
+    const userId = user?.id || 'usr_me'
+
     try {
-      const result = dataService.createWorkout({
+      const result = await dataService.createWorkout(userId, {
         type: selectedType,
         duration_minutes: Number(duration),
         distance_km: distance ? parseFloat(distance) : null,
@@ -94,7 +99,7 @@ export function WorkoutForm() {
           <div className="p-3.5 rounded-2xl bg-orange-500/10 border border-orange-500/20">
             <div className="flex items-center justify-center gap-1 text-orange-400 font-extrabold text-lg">
               <Flame className="w-5 h-5 fill-orange-400" />
-              <span>{dataService.getCurrentUser().current_streak} Gün</span>
+              <span>{profile?.current_streak ?? 0} Gün</span>
             </div>
             <span className="text-[10px] text-slate-400">Aktif Seri</span>
           </div>

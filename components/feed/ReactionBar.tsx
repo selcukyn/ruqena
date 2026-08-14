@@ -5,6 +5,8 @@ import { ReactionType } from '@/types/database'
 import { EnrichedReaction } from '@/types/app'
 import { dataService } from '@/lib/dataService'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 interface ReactionBarProps {
   workoutId: string
   initialReactions: EnrichedReaction[]
@@ -13,9 +15,12 @@ interface ReactionBarProps {
 const ALL_REACTIONS: ReactionType[] = ['🔥', '💪', '❤️', '👏']
 
 export function ReactionBar({ workoutId, initialReactions }: ReactionBarProps) {
+  const { user } = useAuth()
   const [reactions, setReactions] = useState<EnrichedReaction[]>(initialReactions)
 
-  const handleToggle = (type: ReactionType) => {
+  const handleToggle = async (type: ReactionType) => {
+    const userId = user?.id || 'usr_me'
+
     // Optimistic UI update
     setReactions((prev) => {
       return prev.map((r) => {
@@ -33,7 +38,7 @@ export function ReactionBar({ workoutId, initialReactions }: ReactionBarProps) {
 
     // Execute server / dataService call
     try {
-      dataService.toggleReaction(workoutId, type)
+      await dataService.toggleReaction(userId, workoutId, type)
     } catch (err) {
       console.error('Reaction toggle failed:', err)
     }

@@ -6,14 +6,20 @@ import { Home, Trophy, Plus, Bell, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { dataService } from '@/lib/dataService'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export function BottomNav() {
   const pathname = usePathname()
+  const { user } = useAuth()
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    const notifs = dataService.getNotifications()
-    setUnreadCount(notifs.filter((n) => !n.is_read).length)
-  }, [pathname])
+    if (user?.id) {
+      dataService.getNotifications(user.id).then((notifs) => {
+        setUnreadCount(notifs.filter((n) => !n.is_read).length)
+      })
+    }
+  }, [pathname, user?.id])
 
   const navItems = [
     { href: '/home', label: 'Ana Sayfa', icon: Home },

@@ -5,20 +5,43 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Activity, ArrowRight, Lock, Mail, User } from 'lucide-react'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function RegisterPage() {
   const router = useRouter()
+  const { signUp, isConfigured } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => {
+    setError(null)
+
+    if (!isConfigured) {
       setLoading(false)
       router.push('/onboarding')
-    }, 500)
+      return
+    }
+
+    const calculatedUsername = username.trim() || name.toLowerCase().replace(/\s+/g, '_') || 'user'
+    const { error: err } = await signUp(email, password, {
+      display_name: name,
+      username: calculatedUsername,
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    })
+
+    if (err) {
+      setError(err.message || 'Kayıt olunurken bir hata oluştu.')
+      setLoading(false)
+    } else {
+      setLoading(false)
+      router.push('/onboarding')
+    }
   }
 
   return (
@@ -31,6 +54,12 @@ export default function RegisterPage() {
           <h1 className="text-2xl font-black text-white tracking-tight">Topluluğa Katıl 🚀</h1>
           <p className="text-xs text-slate-400 mt-1">Gruptaki arkadaşlarına sen de ilham ver.</p>
         </div>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

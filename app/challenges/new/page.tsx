@@ -13,8 +13,11 @@ const CHALLENGE_TYPES: { type: ChallengeType; label: string; icon: string; unit:
   { type: 'streak', label: 'Antrenman Serisi', icon: '🔥', unit: 'Gün' },
 ]
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function NewChallengePage() {
   const router = useRouter()
+  const { user } = useAuth()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [type, setType] = useState<ChallengeType>('count')
@@ -26,12 +29,14 @@ export default function NewChallengePage() {
 
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
+    const creatorId = user?.id || 'usr_me'
+
     try {
-      const newChg = dataService.createChallenge({
+      const newChg = await dataService.createChallenge(creatorId, {
         title,
         description,
         challenge_type: type,

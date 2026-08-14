@@ -1,5 +1,6 @@
-import { Profile, Workout, ReactionType, Challenge, AppNotification } from '@/types/database'
+import { Profile, Workout, ReactionType, Challenge, AppNotification, FriendRequest, Achievement, UserAchievement } from '@/types/database'
 import { EnrichedWorkout, EnrichedChallenge, LeaderboardEntry } from '@/types/app'
+import { supabase, isSupabaseConfigured } from './supabaseClient'
 import {
   SEED_PROFILES,
   SEED_WORKOUTS,
@@ -9,110 +10,197 @@ import {
 } from './seedData'
 import { calculateWorkoutXP, evaluateStreakUpdate } from './gamification'
 
-// Local storage key constants for interactive fallback persistence
-const STORAGE_KEY_WORKOUTS = 'ruqena_workouts_v1'
-const STORAGE_KEY_PROFILES = 'ruqena_profiles_v1'
-const STORAGE_KEY_CHALLENGES = 'ruqena_challenges_v1'
-const STORAGE_KEY_NOTIFS = 'ruqena_notifications_v1'
-
 class DataService {
-  private workouts: EnrichedWorkout[] = []
-  private profiles: Profile[] = []
-  private challenges: EnrichedChallenge[] = []
-  private notifications: AppNotification[] = []
-  private currentUserId: string = 'usr_me'
+  private localWorkouts: EnrichedWorkout[] = SEED_WORKOUTS
+  private localProfiles: Profile[] = SEED_PROFILES
+  private localChallenges: EnrichedChallenge[] = SEED_CHALLENGES
+  private localNotifications: AppNotification[] = SEED_NOTIFICATIONS
+  private localCurrentUserId: string = 'usr_me'
 
-  constructor() {
-    if (typeof window !== 'undefined') {
-      this.initFromStorage()
-    } else {
-      this.workouts = SEED_WORKOUTS
-      this.profiles = SEED_PROFILES
-      this.challenges = SEED_CHALLENGES
-      this.notifications = SEED_NOTIFICATIONS
+  // --- PROFILES ---
+  async getCurrentProfile(userId?: string): Promise<Profile | null> {
+    if (isSupabaseConfigured && supabase) {
+      const targetId = userId || (await supabase.auth.getUser()).data.user?.id
+      if (!targetId) return null
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', targetId)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Error fetching profile:', error)
+        return null
+      }
+      return data
     }
+
+    const targetId = userId || this.localCurrentUserId
+    return this.localProfiles.find((p) => p.id === targetId) || this.localProfiles[0]
   }
 
-  private initFromStorage() {
-    try {
-      const storedWorkouts = localStorage.getItem(STORAGE_KEY_WORKOUTS)
-      this.workouts = storedWorkouts ? JSON.parse(storedWorkouts) : SEED_WORKOUTS
+  async updateCurrentUserProfile(userId: string, data: Partial<Profile>): Promise<Profile> {
+    // Sanitize: strip out gamification fields so client doesn't attempt direct update
+    const { total_xp, current_streak, longest_streak, id, ...allowedUpdates } = data as any
 
-      const storedProfiles = localStorage.getItem(STORAGE_KEY_PROFILES)
-      this.profiles = storedProfiles ? JSON.parse(storedProfiles) : SEED_PROFILES
+    if (isSupabaseConfigured && supabase) {
+      const { data: updated, error } = await supabase
+        .from('profiles')
+        .update({
+          ...allowedUpdates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId)
+        .select()
+        .single()
 
-      const storedChallenges = localStorage.getItem(STORAGE_KEY_CHALLENGES)
-      this.challenges = storedChallenges ? JSON.parse(storedChallenges) : SEED_CHALLENGES
-
-      const storedNotifs = localStorage.getItem(STORAGE_KEY_NOTIFS)
-      this.notifications = storedNotifs ? JSON.parse(storedNotifs) : SEED_NOTIFICATIONS
-    } catch {
-      this.workouts = SEED_WORKOUTS
-      this.profiles = SEED_PROFILES
-      this.challenges = SEED_CHALLENGES
-      this.notifications = SEED_NOTIFICATIONS
+      if (error) throw new Error(error.message)
+      return updated
     }
-  }
 
-  private saveToStorage() {
-    if (typeof window === 'undefined') return
-    try {
-      localStorage.setItem(STORAGE_KEY_WORKOUTS, JSON.stringify(this.workouts))
-      localStorage.setItem(STORAGE_KEY_PROFILES, JSON.stringify(this.profiles))
-      localStorage.setItem(STORAGE_KEY_CHALLENGES, JSON.stringify(this.challenges))
-      localStorage.setItem(STORAGE_KEY_NOTIFS, JSON.stringify(this.notifications))
-    } catch (e) {
-      console.warn('Storage save failed:', e)
-    }
-  }
-
-  // --- CURRENT USER ---
-  getCurrentUser(): Profile {
-    return this.profiles.find((p) => p.id === this.currentUserId) || this.profiles[0]
-  }
-
-  updateCurrentUserProfile(data: Partial<Profile>): Profile {
-    const user = this.getCurrentUser()
-    Object.assign(user, data, { updated_at: new Date().toISOString() })
-    this.saveToStorage()
+    const user = this.localProfiles.find((p) => p.id === userId) || this.localProfiles[0]
+    Object.assign(user, allowedUpdates, { updated_at: new Date().toISOString() })
     return user
   }
 
-  // --- PROFILES ---
-  getAllProfiles(): Profile[] {
-    return this.profiles
+  async getAllProfiles(): Promise<Profile[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('profiles').select('*')
+      if (error) throw new Error(error.message)
+      return data || []
+    }
+    return this.localProfiles
   }
 
-  getProfileByUsername(username: string): Profile | undefined {
-    return this.profiles.find((p) => p.username.toLowerCase() === username.toLowerCase())
+  async getProfileByUsername(username: string): Promise<Profile | null> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('username', username)
+        .maybeSingle()
+
+      if (error) throw new Error(error.message)
+      return data
+    }
+    return this.localProfiles.find((p) => p.username.toLowerCase() === username.toLowerCase()) || null
   }
 
   // --- WORKOUTS & FEED ---
-  getFeedWorkouts(): EnrichedWorkout[] {
-    return [...this.workouts].sort(
+  async getFeedWorkouts(): Promise<EnrichedWorkout[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('workouts')
+        .select('*, user:profiles!workouts_user_id_fkey(*), reactions:workout_reactions(*)')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching feed workouts:', error)
+        return []
+      }
+
+      const currentAuthUser = (await supabase.auth.getUser()).data.user
+      const currentUserId = currentAuthUser?.id || ''
+
+      // Transform DB relations into EnrichedWorkout format
+      return (data || []).map((w: any) => {
+        const rawReactions = w.reactions || []
+        const groupedMap: Record<string, { count: number; has_user_reacted: boolean; user_ids: string[] }> = {
+          '🔥': { count: 0, has_user_reacted: false, user_ids: [] },
+          '❤️': { count: 0, has_user_reacted: false, user_ids: [] },
+          '💪': { count: 0, has_user_reacted: false, user_ids: [] },
+          '👏': { count: 0, has_user_reacted: false, user_ids: [] },
+        }
+
+        rawReactions.forEach((rx: any) => {
+          if (groupedMap[rx.reaction_type]) {
+            groupedMap[rx.reaction_type].count += 1
+            groupedMap[rx.reaction_type].user_ids.push(rx.user_id)
+            if (rx.user_id === currentUserId) {
+              groupedMap[rx.reaction_type].has_user_reacted = true
+            }
+          }
+        })
+
+        return {
+          ...w,
+          user: w.user,
+          reactions: Object.entries(groupedMap).map(([type, val]) => ({
+            reaction_type: type as ReactionType,
+            ...val,
+          })),
+        }
+      })
+    }
+
+    return [...this.localWorkouts].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
   }
 
-  getUserWorkouts(userId: string): EnrichedWorkout[] {
-    return this.workouts.filter((w) => w.user_id === userId)
+  async getUserWorkouts(userId: string): Promise<EnrichedWorkout[]> {
+    if (isSupabaseConfigured && supabase) {
+      const feed = await this.getFeedWorkouts()
+      return feed.filter((w) => w.user_id === userId)
+    }
+    return this.localWorkouts.filter((w) => w.user_id === userId)
   }
 
-  createWorkout(input: {
-    type: Workout['type']
-    duration_minutes: number
-    distance_km?: number | null
-    calories?: number | null
-    notes?: string | null
-    image_url?: string | null
-    workout_date?: string
-    visibility?: 'friends' | 'private'
-  }): { workout: EnrichedWorkout; xpEarned: number; streakExtended: boolean } {
-    const user = this.getCurrentUser()
+  async createWorkout(
+    userId: string,
+    input: {
+      type: Workout['type']
+      duration_minutes: number
+      distance_km?: number | null
+      calories?: number | null
+      notes?: string | null
+      image_url?: string | null
+      workout_date?: string
+      visibility?: 'friends' | 'private'
+    }
+  ): Promise<{ workout: EnrichedWorkout; xpEarned: number; streakExtended: boolean }> {
     const xpEarned = calculateWorkoutXP(input)
-    
-    const lastWorkout = this.workouts.find(w => w.user_id === user.id)
-    const streakResult = evaluateStreakUpdate(user.current_streak, lastWorkout ? lastWorkout.workout_date : null)
+
+    if (isSupabaseConfigured && supabase) {
+      const { data: inserted, error } = await supabase
+        .from('workouts')
+        .insert({
+          user_id: userId,
+          type: input.type,
+          duration_minutes: Number(input.duration_minutes),
+          distance_km: input.distance_km ? Number(input.distance_km) : null,
+          calories: input.calories ? Number(input.calories) : null,
+          notes: input.notes || null,
+          image_url: input.image_url || null,
+          workout_date: input.workout_date || new Date().toISOString().split('T')[0],
+          visibility: input.visibility || 'friends',
+        })
+        .select('*, user:profiles!workouts_user_id_fkey(*)')
+        .single()
+
+      if (error) throw new Error(error.message)
+
+      const enriched: EnrichedWorkout = {
+        ...inserted,
+        user: inserted.user,
+        reactions: [
+          { reaction_type: '🔥', count: 0, has_user_reacted: false, user_ids: [] },
+          { reaction_type: '❤️', count: 0, has_user_reacted: false, user_ids: [] },
+          { reaction_type: '💪', count: 0, has_user_reacted: false, user_ids: [] },
+          { reaction_type: '👏', count: 0, has_user_reacted: false, user_ids: [] },
+        ],
+      }
+
+      return { workout: enriched, xpEarned, streakExtended: false }
+    }
+
+    const user = this.localProfiles.find((p) => p.id === userId) || this.localProfiles[0]
+    const lastWorkout = this.localWorkouts.find((w) => w.user_id === user.id)
+    const streakResult = evaluateStreakUpdate(
+      user.current_streak,
+      lastWorkout ? lastWorkout.workout_date : null
+    )
 
     user.current_streak = streakResult.newStreak
     if (user.current_streak > user.longest_streak) {
@@ -141,33 +229,48 @@ class DataService {
       ],
     }
 
-    this.workouts.unshift(newWorkout)
-
-    // Update challenge progress if applicable
-    this.challenges.forEach((chg) => {
-      const member = chg.members.find((m) => m.user_id === user.id)
-      if (member) {
-        if (chg.challenge_type === 'count') {
-          member.progress += 1
-        } else if (chg.challenge_type === 'duration') {
-          member.progress += newWorkout.duration_minutes
-        } else if (chg.challenge_type === 'distance' && newWorkout.distance_km) {
-          member.progress += newWorkout.distance_km
-        }
-      }
-    })
-
-    this.saveToStorage()
+    this.localWorkouts.unshift(newWorkout)
     return { workout: newWorkout, xpEarned, streakExtended: streakResult.isExtended }
   }
 
+  async deleteWorkout(workoutId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('workouts').delete().eq('id', workoutId)
+      if (error) throw new Error(error.message)
+      return
+    }
+
+    this.localWorkouts = this.localWorkouts.filter((w) => w.id !== workoutId)
+  }
+
   // --- REACTIONS ---
-  toggleReaction(workoutId: string, reactionType: ReactionType): EnrichedWorkout {
-    const workout = this.workouts.find((w) => w.id === workoutId)
-    if (!workout) throw new Error('Workout not found')
+  async toggleReaction(userId: string, workoutId: string, reactionType: ReactionType): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      // Check if reaction exists
+      const { data: existing } = await supabase
+        .from('workout_reactions')
+        .select('*')
+        .eq('workout_id', workoutId)
+        .eq('user_id', userId)
+        .eq('reaction_type', reactionType)
+        .maybeSingle()
+
+      if (existing) {
+        await supabase.from('workout_reactions').delete().eq('id', existing.id)
+      } else {
+        await supabase.from('workout_reactions').insert({
+          workout_id: workoutId,
+          user_id: userId,
+          reaction_type: reactionType,
+        })
+      }
+      return
+    }
+
+    const workout = this.localWorkouts.find((w) => w.id === workoutId)
+    if (!workout) return
 
     let rxObj = workout.reactions.find((r) => r.reaction_type === reactionType)
-
     if (!rxObj) {
       rxObj = { reaction_type: reactionType, count: 0, has_user_reacted: false, user_ids: [] }
       workout.reactions.push(rxObj)
@@ -176,46 +279,153 @@ class DataService {
     if (rxObj.has_user_reacted) {
       rxObj.has_user_reacted = false
       rxObj.count = Math.max(0, rxObj.count - 1)
-      rxObj.user_ids = rxObj.user_ids.filter((id) => id !== this.currentUserId)
+      rxObj.user_ids = rxObj.user_ids.filter((id) => id !== userId)
     } else {
       rxObj.has_user_reacted = true
       rxObj.count += 1
-      rxObj.user_ids.push(this.currentUserId)
+      rxObj.user_ids.push(userId)
+    }
+  }
 
-      // Generate notification for workout owner if not self
-      if (workout.user_id !== this.currentUserId) {
-        this.addNotification({
-          user_id: workout.user_id,
-          type: 'WORKOUT_REACTION',
-          title: 'Yeni Tepki! 🔥',
-          message: `${this.getCurrentUser().display_name} senin ${workout.type} antrenmanına ${reactionType} verdi.`,
-          reference_id: workout.id,
+  // --- FRIEND SYSTEM (RPC ONLY) ---
+  async sendFriendRequest(receiverId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('send_friend_request', {
+        p_receiver_id: receiverId,
+      })
+      if (error) throw new Error(error.message)
+      return
+    }
+  }
+
+  async respondToFriendRequest(requestId: string, status: 'accepted' | 'rejected'): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('respond_to_friend_request', {
+        p_request_id: requestId,
+        p_status: status,
+      })
+      if (error) throw new Error(error.message)
+      return
+    }
+  }
+
+  async getFriends(userId: string): Promise<Profile[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('friends')
+        .select('*, friend:profiles!friends_friend_id_fkey(*)')
+        .eq('user_id', userId)
+
+      if (error) throw new Error(error.message)
+      return (data || []).map((f: any) => f.friend)
+    }
+    return this.localProfiles.filter((p) => p.id !== userId)
+  }
+
+  async getFriendRequests(userId: string): Promise<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select('*')
+        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+
+      if (error) throw new Error(error.message)
+
+      const incoming = (data || []).filter((r: any) => r.receiver_id === userId && r.status === 'pending')
+      const outgoing = (data || []).filter((r: any) => r.sender_id === userId && r.status === 'pending')
+
+      return { incoming, outgoing }
+    }
+    return { incoming: [], outgoing: [] }
+  }
+
+  // --- CHALLENGES & RPC JOIN ---
+  async getChallenges(): Promise<EnrichedChallenge[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('challenges')
+        .select('*, creator:profiles!challenges_creator_id_fkey(*), members:challenge_members(*, user:profiles(*))')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching challenges:', error)
+        return []
+      }
+
+      const currentAuthUser = (await supabase.auth.getUser()).data.user
+      const currentUserId = currentAuthUser?.id || ''
+
+      return (data || []).map((chg: any) => {
+        const membersList = chg.members || []
+        const userMemberObj = membersList.find((m: any) => m.user_id === currentUserId)
+        return {
+          ...chg,
+          creator: chg.creator,
+          members: membersList,
+          user_progress: userMemberObj ? Number(userMemberObj.progress) : 0,
+          is_user_member: Boolean(userMemberObj),
+          days_remaining: Math.max(
+            0,
+            Math.ceil((new Date(chg.end_date).getTime() - new Date().getTime()) / 86400000)
+          ),
+        }
+      })
+    }
+
+    return this.localChallenges
+  }
+
+  async getChallengeById(id: string): Promise<EnrichedChallenge | null> {
+    if (isSupabaseConfigured && supabase) {
+      const challenges = await this.getChallenges()
+      return challenges.find((c) => c.id === id) || null
+    }
+    return this.localChallenges.find((c) => c.id === id) || null
+  }
+
+  async createChallenge(
+    creatorId: string,
+    input: {
+      title: string
+      description?: string
+      challenge_type: Challenge['challenge_type']
+      target_value: number
+      start_date: string
+      end_date: string
+    }
+  ): Promise<EnrichedChallenge> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('challenges')
+        .insert({
+          creator_id: creatorId,
+          title: input.title,
+          description: input.description || null,
+          challenge_type: input.challenge_type,
+          target_value: Number(input.target_value),
+          start_date: input.start_date,
+          end_date: input.end_date,
         })
+        .select('*, creator:profiles!challenges_creator_id_fkey(*)')
+        .single()
+
+      if (error) throw new Error(error.message)
+
+      // Creator automatically joins as member
+      await this.joinChallenge(data.id)
+
+      return {
+        ...data,
+        creator: data.creator,
+        members: [],
+        days_remaining: Math.max(
+          0,
+          Math.ceil((new Date(input.end_date).getTime() - new Date().getTime()) / 86400000)
+        ),
       }
     }
 
-    this.saveToStorage()
-    return workout
-  }
-
-  // --- CHALLENGES ---
-  getChallenges(): EnrichedChallenge[] {
-    return this.challenges
-  }
-
-  getChallengeById(id: string): EnrichedChallenge | undefined {
-    return this.challenges.find((c) => c.id === id)
-  }
-
-  createChallenge(input: {
-    title: string
-    description?: string
-    challenge_type: Challenge['challenge_type']
-    target_value: number
-    start_date: string
-    end_date: string
-  }): EnrichedChallenge {
-    const creator = this.getCurrentUser()
+    const creator = this.localProfiles.find((p) => p.id === creatorId) || this.localProfiles[0]
     const newChg: EnrichedChallenge = {
       id: `chg_${Date.now()}`,
       creator_id: creator.id,
@@ -245,36 +455,40 @@ class DataService {
       ],
     }
 
-    this.challenges.unshift(newChg)
-    this.saveToStorage()
+    this.localChallenges.unshift(newChg)
     return newChg
   }
 
-  joinChallenge(challengeId: string): EnrichedChallenge {
-    const chg = this.getChallengeById(challengeId)
-    if (!chg) throw new Error('Challenge not found')
+  async joinChallenge(challengeId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('join_challenge', {
+        p_challenge_id: challengeId,
+      })
+      if (error) throw new Error(error.message)
+      return
+    }
 
-    const user = this.getCurrentUser()
-    if (!chg.members.some((m) => m.user_id === user.id)) {
+    const chg = this.localChallenges.find((c) => c.id === challengeId)
+    if (chg && !chg.members.some((m) => m.user_id === 'usr_me')) {
       chg.members.push({
         id: `cm_${Date.now()}`,
         challenge_id: challengeId,
-        user_id: user.id,
+        user_id: 'usr_me',
         progress: 0,
         joined_at: new Date().toISOString(),
-        user,
+        user: this.localProfiles[0],
       })
       chg.is_user_member = true
     }
-
-    this.saveToStorage()
-    return chg
   }
 
-  // --- LEADERBOARDS ---
-  getLeaderboard(period: 'weekly' | 'monthly' | 'alltime'): LeaderboardEntry[] {
-    const entries: LeaderboardEntry[] = this.profiles.map((user) => {
-      const userWkts = this.workouts.filter((w) => w.user_id === user.id)
+  // --- LEADERBOARD ---
+  async getLeaderboard(period: 'weekly' | 'monthly' | 'alltime'): Promise<LeaderboardEntry[]> {
+    const profiles = await this.getAllProfiles()
+    const workouts = await this.getFeedWorkouts()
+
+    const entries: LeaderboardEntry[] = profiles.map((user) => {
+      const userWkts = workouts.filter((w) => w.user_id === user.id)
       const count = userWkts.length
       return {
         rank: 0,
@@ -293,36 +507,63 @@ class DataService {
     return entries
   }
 
-  // --- NOTIFICATIONS ---
-  getNotifications(): AppNotification[] {
-    return this.notifications
-  }
+  // --- NOTIFICATIONS (READ & UPDATE ONLY — NO CLIENT INSERT) ---
+  async getNotifications(userId: string): Promise<AppNotification[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
 
-  addNotification(notif: Omit<AppNotification, 'id' | 'created_at' | 'is_read'>): AppNotification {
-    const newNotif: AppNotification = {
-      ...notif,
-      id: `notif_${Date.now()}`,
-      is_read: false,
-      created_at: new Date().toISOString(),
+      if (error) throw new Error(error.message)
+      return data || []
     }
-    this.notifications.unshift(newNotif)
-    this.saveToStorage()
-    return newNotif
+    return this.localNotifications
   }
 
-  markNotificationAsRead(id: string) {
-    const notif = this.notifications.find((n) => n.id === id)
+  async markNotificationAsRead(id: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id)
+      if (error) throw new Error(error.message)
+      return
+    }
+
+    const notif = this.localNotifications.find((n) => n.id === id)
     if (notif) notif.is_read = true
-    this.saveToStorage()
   }
 
-  markAllNotificationsAsRead() {
-    this.notifications.forEach((n) => (n.is_read = true))
-    this.saveToStorage()
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', userId)
+      if (error) throw new Error(error.message)
+      return
+    }
+
+    this.localNotifications.forEach((n) => (n.is_read = true))
   }
 
-  getAchievements() {
+  // --- ACHIEVEMENTS (READ ONLY — NO CLIENT INSERT) ---
+  async getAchievements(): Promise<Achievement[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('achievements').select('*')
+      if (error) throw new Error(error.message)
+      return data || []
+    }
     return SEED_ACHIEVEMENTS
+  }
+
+  async getUserAchievements(userId: string): Promise<UserAchievement[]> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('user_achievements')
+        .select('*, achievement:achievements(*)')
+        .eq('user_id', userId)
+
+      if (error) throw new Error(error.message)
+      return data || []
+    }
+    return []
   }
 }
 

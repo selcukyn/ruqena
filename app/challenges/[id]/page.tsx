@@ -5,11 +5,47 @@ import { useState } from 'react'
 import { Trophy, Clock, Target, Users, Flame, Check, UserPlus } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 
+import { useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+import { EnrichedChallenge } from '@/types/app'
+
 export default function ChallengeDetailPage() {
   const params = useParams()
   const id = params?.id as string
-  const [challenge, setChallenge] = useState(() => dataService.getChallengeById(id))
-  const me = dataService.getCurrentUser()
+  const { user } = useAuth()
+  const [challenge, setChallenge] = useState<EnrichedChallenge | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [joinError, setJoinError] = useState<string | null>(null)
+
+  const reloadChallenge = async () => {
+    if (!id) return
+    const chg = await dataService.getChallengeById(id)
+    setChallenge(chg)
+  }
+
+  useEffect(() => {
+    reloadChallenge().finally(() => setLoading(false))
+  }, [id])
+
+  const handleJoin = async () => {
+    if (!challenge) return
+    setJoinError(null)
+    try {
+      await dataService.joinChallenge(challenge.id)
+      await reloadChallenge()
+    } catch (err: any) {
+      setJoinError(err.message || 'Yarışa katılırken bir hata oluştu.')
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Yarış Detayı Yükleniyor...</p>
+      </div>
+    )
+  }
 
   if (!challenge) {
     return (
@@ -20,22 +56,18 @@ export default function ChallengeDetailPage() {
     )
   }
 
-  const isMember = challenge.members.some((m) => m.user_id === me.id)
-
-  const handleJoin = () => {
-    const updated = dataService.joinChallenge(challenge.id)
-    setChallenge({ ...updated })
-  }
+  const currentUserId = user?.id || ''
+  const isMember = challenge.is_user_member || challenge.members.some((m) => m.user_id === currentUserId)
 
   // Sort members by progress descending
   const sortedMembers = [...challenge.members].sort((a, b) => b.progress - a.progress)
   const leader = sortedMembers[0]
-  const userRank = sortedMembers.findIndex((m) => m.user_id === me.id) + 1
-  const userMember = sortedMembers.find((m) => m.user_id === me.id)
+  const userRank = sortedMembers.findIndex((m) => m.user_id === currentUserId) + 1
+  const userMember = sortedMembers.find((m) => m.user_id === currentUserId)
 
   // Motivational copy for current user
   let motivationalMessage = 'Harika gidiyorsun! Antrenmanlarına devam et.'
-  if (leader && leader.user_id !== me.id && userMember) {
+  if (leader && leader.user_id !== currentUserId && userMember) {
     const diff = leader.progress - userMember.progress
     motivationalMessage = `${leader.user.display_name.split(' ')[0]}'e yetişmek için ${diff > 0 ? diff : 1} ${
       challenge.challenge_type === 'distance'
@@ -100,7 +132,13 @@ export default function ChallengeDetailPage() {
         </div>
       </div>
 
-      {/* Motivational Alert Banner */}
+        {joinError && (
+          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
+            {joinError}
+          </div>
+        )}
+
+        {/* Motivational Alert Banner */}
       {isMember && (
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-2">
           <Flame className="w-5 h-5 fill-emerald-400 shrink-0" />
@@ -118,7 +156,7 @@ export default function ChallengeDetailPage() {
         <div className="space-y-2">
           {sortedMembers.map((member, idx) => {
             const rank = idx + 1
-            const isMeMember = member.user_id === me.id
+            const isMeMember = member.user_id === currentUserId
             const progressPercent = Math.min(
               100,
               Math.round((member.progress / challenge.target_value) * 100)

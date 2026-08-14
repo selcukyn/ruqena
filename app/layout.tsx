@@ -4,6 +4,8 @@ import { Sidebar } from '@/components/navigation/Sidebar'
 import { BottomNav } from '@/components/navigation/BottomNav'
 import { Header } from '@/components/navigation/Header'
 
+import { AuthProvider } from '@/components/providers/AuthProvider'
+
 export const metadata: Metadata = {
   title: 'RUQENA — Sosyal Fitness & Workout Challenge',
   description: 'Arkadaşlarınla antrenman kaydet, meydan okumalar yap ve serini koru!',
@@ -34,24 +36,26 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
       </head>
       <body className="bg-[#090d16] text-slate-100 min-h-screen antialiased selection:bg-emerald-500 selection:text-slate-950">
-        <div className="flex min-h-screen">
-          {/* Desktop Navigation */}
-          <Sidebar />
+        <AuthProvider>
+          <div className="flex min-h-screen">
+            {/* Desktop Navigation */}
+            <Sidebar />
 
-          {/* Main App Content Area */}
-          <div className="flex-1 md:pl-64 flex flex-col min-h-screen">
-            {/* Mobile Header */}
-            <Header />
+            {/* Main App Content Area */}
+            <div className="flex-1 md:pl-64 flex flex-col min-h-screen">
+              {/* Mobile Header */}
+              <Header />
 
-            {/* Page Content */}
-            <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-4 md:py-6 pb-24 md:pb-8">
-              {children}
-            </main>
+              {/* Page Content */}
+              <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-4 md:py-6 pb-24 md:pb-8">
+                {children}
+              </main>
+            </div>
           </div>
-        </div>
 
-        {/* Mobile Navigation Bar */}
-        <BottomNav />
+          {/* Mobile Navigation Bar */}
+          <BottomNav />
+        </AuthProvider>
 
         {/* Register PWA Service Worker */}
         <script

@@ -6,15 +6,20 @@ import { Home, Trophy, Award, Users, Bell, User, Plus, Flame, Activity } from 'l
 import { useEffect, useState } from 'react'
 import { dataService } from '@/lib/dataService'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export function Sidebar() {
   const pathname = usePathname()
+  const { profile, user: authUser } = useAuth()
   const [unreadCount, setUnreadCount] = useState(0)
-  const user = dataService.getCurrentUser()
 
   useEffect(() => {
-    const notifs = dataService.getNotifications()
-    setUnreadCount(notifs.filter((n) => !n.is_read).length)
-  }, [pathname])
+    if (authUser?.id) {
+      dataService.getNotifications(authUser.id).then((notifs) => {
+        setUnreadCount(notifs.filter((n) => !n.is_read).length)
+      })
+    }
+  }, [pathname, authUser?.id])
 
   const navItems = [
     { href: '/home', label: 'Ana Sayfa', icon: Home },
@@ -84,17 +89,17 @@ export function Sidebar() {
           className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-800/50 transition-colors"
         >
           <img
-            src={user.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-            alt={user.display_name}
+            src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+            alt={profile?.display_name || 'Kullanıcı'}
             className="w-10 h-10 rounded-full object-cover border border-slate-700"
           />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{user.display_name}</p>
-            <p className="text-xs text-slate-400 truncate">@{user.username}</p>
+            <p className="text-sm font-semibold text-white truncate">{profile?.display_name || 'Giriş Yapılmadı'}</p>
+            <p className="text-xs text-slate-400 truncate">@{profile?.username || 'misafir'}</p>
           </div>
           <div className="flex items-center gap-1 text-orange-400 font-bold text-xs bg-orange-500/10 px-2 py-1 rounded-lg border border-orange-500/20">
             <Flame className="w-3.5 h-3.5 fill-orange-400 text-orange-400" />
-            <span>{user.current_streak}d</span>
+            <span>{profile?.current_streak ?? 0}d</span>
           </div>
         </Link>
       </div>

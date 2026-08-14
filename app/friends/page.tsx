@@ -6,41 +6,85 @@ import { Users, Search, UserPlus, Flame, Check, X, ChevronRight } from 'lucide-r
 import { dataService } from '@/lib/dataService'
 import { Profile } from '@/types/database'
 
+import { useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export default function FriendsPage() {
+  const { user } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'my_friends' | 'requests'>('my_friends')
-  const allProfiles = dataService.getAllProfiles()
-  const me = dataService.getCurrentUser()
+  const [friends, setFriends] = useState<Profile[]>([])
+  const [requests, setRequests] = useState<{ id: string; user: Profile }[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // Filter friends (excluding current user)
-  const myFriends = allProfiles.filter((p) => p.id !== me.id)
+  useEffect(() => {
+    async function loadFriendsData() {
+      if (!user?.id) return
+      try {
+        const [f, reqs] = await Promise.all([
+          dataService.getFriends(user.id),
+          dataService.getFriendRequests(user.id),
+        ])
+        setFriends(f)
 
-  const filteredFriends = myFriends.filter(
+        // Transform incoming requests to format with profile data
+        const incomingMapped = await Promise.all(
+          reqs.incoming.map(async (r) => {
+            const senderProfile = await dataService.getCurrentProfile(r.sender_id)
+            return {
+              id: r.id,
+              user: senderProfile || {
+                id: r.sender_id,
+                username: 'user',
+                display_name: 'Sporcu',
+                avatar_url: null,
+                bio: null,
+                weekly_goal: 3,
+                current_streak: 0,
+                longest_streak: 0,
+                total_xp: 0,
+                created_at: r.created_at,
+                updated_at: r.created_at,
+              },
+            }
+          })
+        )
+        setRequests(incomingMapped)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadFriendsData()
+  }, [user?.id])
+
+  const filteredFriends = friends.filter(
     (p) =>
       p.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.username.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  // Demo requests
-  const [requests, setRequests] = useState([
-    {
-      id: 'req_1',
-      user: {
-        id: 'usr_elof',
-        username: 'elif_fit',
-        display_name: 'Elif Şahin',
-        avatar_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
-        current_streak: 6,
-      },
-    },
-  ])
-
-  const handleAcceptRequest = (id: string) => {
-    setRequests((prev) => prev.filter((r) => r.id !== id))
+  const handleAcceptRequest = async (requestId: string) => {
+    try {
+      await dataService.respondToFriendRequest(requestId, 'accepted')
+      setRequests((prev) => prev.filter((r) => r.id !== requestId))
+      if (user?.id) {
+        const updatedFriends = await dataService.getFriends(user.id)
+        setFriends(updatedFriends)
+      }
+    } catch (err) {
+      console.error(err)
+    }
   }
 
-  const handleRejectRequest = (id: string) => {
-    setRequests((prev) => prev.filter((r) => r.id !== id))
+  const handleRejectRequest = async (requestId: string) => {
+    try {
+      await dataService.respondToFriendRequest(requestId, 'rejected')
+      setRequests((prev) => prev.filter((r) => r.id !== requestId))
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   return (
@@ -69,7 +113,7 @@ export default function FriendsPage() {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Arkadaşlarım ({myFriends.length})
+            Arkadaşlarım ({friends.length})
           </button>
           <button
             onClick={() => setActiveTab('requests')}
@@ -153,7 +197,7 @@ export default function FriendsPage() {
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={req.user.avatar_url}
+                    src={req.user.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
                     alt={req.user.display_name}
                     className="w-11 h-11 rounded-full object-cover border border-slate-700"
                   />

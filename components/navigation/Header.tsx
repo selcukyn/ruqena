@@ -5,14 +5,20 @@ import { Flame, Bell, Activity } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 import { useEffect, useState } from 'react'
 
+import { useAuth } from '@/components/providers/AuthProvider'
+
 export function Header() {
-  const user = dataService.getCurrentUser()
+  const { profile, user: authUser } = useAuth()
+  const currentStreak = profile?.current_streak ?? 0
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    const notifs = dataService.getNotifications()
-    setUnreadCount(notifs.filter((n) => !n.is_read).length)
-  }, [])
+    if (authUser?.id) {
+      dataService.getNotifications(authUser.id).then((notifs) => {
+        setUnreadCount(notifs.filter((n) => !n.is_read).length)
+      })
+    }
+  }, [authUser?.id])
 
   return (
     <header className="md:hidden sticky top-0 z-40 bg-[#090d16]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
@@ -32,7 +38,7 @@ export function Header() {
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-orange-500/15 to-amber-500/15 border border-orange-500/30 text-orange-400 text-xs font-bold shadow-sm"
         >
           <Flame className="w-4 h-4 fill-orange-400 text-orange-400 flame-glow" />
-          <span>{user.current_streak} Gün Seri</span>
+          <span>{currentStreak} Gün Seri</span>
         </Link>
 
         {/* Bell Icon */}

@@ -5,11 +5,20 @@ import Link from 'next/link'
 import { Award, Flame, Trophy, Crown, TrendingUp } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 
-export default function LeaderboardPage() {
-  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'alltime'>('weekly')
-  const leaderboard = dataService.getLeaderboard(period)
-  const me = dataService.getCurrentUser()
+import { useEffect } from 'react'
+import { useAuth } from '@/components/providers/AuthProvider'
+import { LeaderboardEntry } from '@/types/app'
 
+export default function LeaderboardPage() {
+  const { user } = useAuth()
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'alltime'>('weekly')
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+
+  useEffect(() => {
+    dataService.getLeaderboard(period).then(setLeaderboard)
+  }, [period])
+
+  const currentUserId = user?.id || ''
   const firstPlace = leaderboard[0]
   const secondPlace = leaderboard[1]
   const thirdPlace = leaderboard[2]
@@ -129,7 +138,7 @@ export default function LeaderboardPage() {
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Tüm Sıralama</h2>
 
         {leaderboard.map((entry) => {
-          const isMe = entry.user.id === me.id
+          const isMe = entry.user.id === currentUserId
           return (
             <Link
               key={entry.user.id}
