@@ -1,6 +1,6 @@
-# RUQENA — Database Security & RLS Architecture (Sprint 1A)
+# RUQENA — Database Security & RLS Architecture (Sprint 1A Hardened)
 
-This document details the hardened PostgreSQL database schema, Row Level Security (RLS) policies, RPC security, and verification matrix for the RUQENA MVP.
+This document details the hardened PostgreSQL database schema, Row Level Security (RLS) policies, RPC security, and recursion-free helper functions for the RUQENA MVP.
 
 ---
 
@@ -8,65 +8,54 @@ This document details the hardened PostgreSQL database schema, Row Level Securit
 
 | Table | RLS Enabled | SELECT Policy | INSERT Policy | UPDATE Policy | DELETE Policy |
 | :--- | :---: | :--- | :--- | :--- | :--- |
-| `public.profiles` | ✅ | Authenticated users | System Trigger Only | Owner (`auth.uid() = id`) | Denied |
-| `public.friend_requests` | ✅ | Participants (`sender_id` or `receiver_id`) | Sender (`auth.uid() = sender_id`) with uniqueness & non-self check | Receiver (`auth.uid() = receiver_id`) | Denied |
+| `public.profiles` | ✅ | Authenticated users | System Trigger Only (`handle_new_user`) | Owner (`auth.uid() = id`) | Denied |
+| `public.friend_requests` | ✅ | Participants (`sender_id` or `receiver_id`) | Sender (`auth.uid() = sender_id`) via `has_existing_friend_request` check | Receiver (`auth.uid() = receiver_id`) | Denied |
 | `public.friends` | ✅ | Friendship members (`user_id` or `friend_id`) | `accept_friend_request` RPC only | Denied | Denied |
-| `public.workouts` | ✅ | Owner OR (accepted friend AND `visibility = 'friends'`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) |
+| `public.workouts` | ✅ | Owner OR (accepted friend via `are_friends` AND `visibility = 'friends'`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) |
 | `public.workout_reactions` | ✅ | Allowed if parent workout is viewable by user | Owner (`auth.uid() = user_id`) & parent workout viewable | Denied | Owner (`auth.uid() = user_id`) |
-| `public.challenges` | ✅ | Creator OR challenge member | Creator (`auth.uid() = creator_id`) with date/target checks | Denied | Denied |
-| `public.challenge_members` | ✅ | Challenge creator OR challenge members | Self (`auth.uid() = user_id`) & valid challenge | Denied | Denied |
+| `public.challenges` | ✅ | Creator OR `is_challenge_member()` | Creator (`auth.uid() = creator_id`) with date/target checks | Denied | Denied |
+| `public.challenge_members` | ✅ | Self OR `is_challenge_creator()` OR `is_challenge_member()` | Self (`auth.uid() = user_id`) & valid challenge | Denied | Denied |
 | `public.notifications` | ✅ | Owner (`auth.uid() = user_id`) | System / Database Trigger Only | Owner (`auth.uid() = user_id`) (`is_read` only) | Denied |
 | `public.achievements` | ✅ | Global viewable (`USING (true)`) | Denied | Denied | Denied |
-| `public.user_achievements` | ✅ | Self OR accepted friends | System / Database Trigger Only | Denied | Denied |
+| `public.user_achievements` | ✅ | Self OR `are_friends()` | System / Database Trigger Only | Denied | Denied |
 | `public.push_subscriptions` | ✅ | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) |
 
 ---
 
-## 🔒 2. Key Security Mechanisms
+## 🛡️ 2. SECURITY DEFINER Helper Functions (Zero RLS Recursion)
 
-### Workout Privacy Enforcers (`visibility`)
-* Workouts contain a `visibility` column: `'friends'` (default) or `'private'`.
-* **Private Workouts**: Enforced at PostgreSQL RLS layer. Never visible to friends or 3rd parties regardless of client query filters.
-* **Reactions**: Inherit the exact RLS viewability rules of the parent workout.
+To completely eliminate circular policy evaluation loops (RLS infinite recursion), all cross-table authorization checks are encapsulated in `SECURITY DEFINER` functions with `SET search_path = public, pg_temp`:
+
+1. **`public.is_challenge_creator(p_challenge_id UUID, p_user_id UUID)`**:
+   * Evaluates if `p_user_id` is the creator of `p_challenge_id` without triggering `challenges` SELECT policy recursion.
+2. **`public.is_challenge_member(p_challenge_id UUID, p_user_id UUID)`**:
+   * Evaluates if `p_user_id` is an active member of `p_challenge_id` without triggering `challenge_members` SELECT policy recursion.
+3. **`public.are_friends(p_user_a UUID, p_user_b UUID)`**:
+   * Evaluates bidirectional friendship status between User A and User B.
+4. **`public.has_existing_friend_request(p_user_a UUID, p_user_b UUID)`**:
+   * Evaluates if a pending/accepted request already exists in either direction `(A → B)` or `(B → A)` without triggering `friend_requests` INSERT policy recursion.
+
+---
+
+## 🔑 3. RPC Security & Execution Permissions
 
 ### Atomic Friendship RPC (`public.accept_friend_request`)
-* Friendship records (`public.friends`) **cannot** be inserted directly by clients.
-* `accept_friend_request(p_request_id UUID)` is a `SECURITY DEFINER` function with `SET search_path = public, pg_temp`.
-* Validates caller is the request receiver, updates status to `'accepted'`, and creates bidirectional `(A → B)` and `(B → A)` rows atomically.
-
-### Gamification & XP Anti-Tampering Trigger
-* Trigger `trg_prevent_profile_gamification_tampering` runs `BEFORE UPDATE ON public.profiles`.
-* Automatically reverts any direct client modification to `total_xp`, `current_streak`, or `longest_streak` unless initiated by `service_role` or trusted server context.
-
-### Automatic Profile Creation
-* `on_auth_user_created` trigger fires `AFTER INSERT ON auth.users`.
-* Safe `handle_new_user()` populates `public.profiles` using `NEW.id` and safe metadata extraction with fallback values.
+* **Security Model**: `SECURITY DEFINER`, `SET search_path = public, pg_temp`.
+* **Authorization**: Checks `v_receiver_id = auth.uid()` and `status = 'pending'`.
+* **Execution Privileges**:
+  ```sql
+  REVOKE EXECUTE ON FUNCTION public.accept_friend_request(UUID) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION public.accept_friend_request(UUID) TO authenticated;
+  ```
 
 ---
 
-## 🧪 3. Verification & SQL Test Matrix (14 Scenarios)
-
-```sql
--- SQL Verification Script for RLS Policies & Hardening
-
--- Scenario 1: User A creates a private workout; User B (friend) must NOT see it.
--- Scenario 2: User A creates a friends-only workout; User B (friend) CAN see it.
--- Scenario 3: User A creates a friends-only workout; User C (non-friend) must NOT see it.
--- Scenario 4: User A creates a challenge; User B (non-member) must NOT see it.
--- Scenario 5: User A creates a challenge; User B joins; User B CAN see it.
--- Scenario 6: User C (non-member) cannot enumerate challenge members.
--- Scenario 7: User A sends friend request to B; User C cannot see it.
--- Scenario 8: User B accepts request via accept_friend_request(id); A ↔ B created.
--- Scenario 9: User C cannot insert arbitrary friendships into public.friends.
--- Scenario 10: User A cannot UPDATE User B's profile.
--- Scenario 11: User A UPDATE on own profile with total_xp = 999999 is blocked/reverted by trigger.
--- Scenario 12: User A cannot read User B's push_subscriptions endpoint.
--- Scenario 13: User A cannot INSERT notifications for User B directly.
--- Scenario 14: User A cannot grant themselves user_achievements directly.
-```
+## 👤 4. Profile Username Collision Strategy
+* `handle_new_user()` trigger catches PostgreSQL `unique_violation` exception on `public.profiles(username)`.
+* If a preferred metadata username collides with an existing profile username, the trigger dynamically appends a unique short random suffix (e.g., `_a1b2`) and retries insertion safely without aborting the `auth.users` signup transaction.
 
 ---
 
-## 🔮 4. Known Limitations & Deferred Server-Side Features
-* **Notification Generation**: Will be fully wired via trusted server-side triggers / Edge Functions in Sprint 1B/2.
-* **Achievement Unlocking**: Will be calculated server-side during workout creation in Sprint 1B.
+## 🧪 5. Verification & Build Validation
+* **TypeScript Type Check**: `npx tsc --noEmit` (0 errors)
+* **Next.js Production Build**: `npm run build` (Compiled successfully)

@@ -1,6 +1,67 @@
 -- RUQENA Database Schema & RLS Hardening Migration
--- Sprint 1A: Database Security & RLS Hardening
+-- Sprint 1A: Database Security & RLS Hardening (Refactored to eliminate RLS recursion)
 -- Migration Timestamp: 20260814102000
+
+-- ==================================================
+-- 0. SECURITY DEFINER HELPER FUNCTIONS (PREVENT RLS RECURSION)
+-- ==================================================
+
+-- Helper 1: Check if a user is creator of a challenge
+CREATE OR REPLACE FUNCTION public.is_challenge_creator(p_challenge_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.challenges
+        WHERE id = p_challenge_id AND creator_id = p_user_id
+    );
+$$;
+
+-- Helper 2: Check if a user is a member of a challenge
+CREATE OR REPLACE FUNCTION public.is_challenge_member(p_challenge_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.challenge_members
+        WHERE challenge_id = p_challenge_id AND user_id = p_user_id
+    );
+$$;
+
+-- Helper 3: Check if two users are accepted friends
+CREATE OR REPLACE FUNCTION public.are_friends(p_user_a UUID, p_user_b UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.friends
+        WHERE user_id = p_user_a AND friend_id = p_user_b
+    );
+$$;
+
+-- Helper 4: Check existing friend request in either direction
+CREATE OR REPLACE FUNCTION public.has_existing_friend_request(p_user_a UUID, p_user_b UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.friend_requests
+        WHERE (sender_id = p_user_a AND receiver_id = p_user_b)
+           OR (sender_id = p_user_b AND receiver_id = p_user_a)
+    );
+$$;
 
 -- ==================================================
 -- 1. WORKOUT PRIVACY & CONSTRAINTS
@@ -10,19 +71,14 @@ ALTER TABLE public.workouts ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DE
 ALTER TABLE public.workouts DROP CONSTRAINT IF EXISTS workouts_visibility_check;
 ALTER TABLE public.workouts ADD CONSTRAINT workouts_visibility_check CHECK (visibility IN ('friends', 'private'));
 
--- Drop old workout SELECT policy
+-- Drop old workout SELECT policies
 DROP POLICY IF EXISTS "Workouts viewable by self and friends" ON public.workouts;
 DROP POLICY IF EXISTS "Workouts SELECT policy" ON public.workouts;
 
--- Enforce strict workout SELECT policy:
--- Private workouts: viewable ONLY by owner (auth.uid() = user_id)
--- Friends workouts: viewable by owner OR accepted friends
+-- Enforce strict workout SELECT policy using are_friends helper:
 CREATE POLICY "Workouts SELECT policy" ON public.workouts FOR SELECT TO authenticated USING (
     user_id = auth.uid() OR (
-        visibility = 'friends' AND EXISTS (
-            SELECT 1 FROM public.friends f
-            WHERE f.user_id = auth.uid() AND f.friend_id = workouts.user_id
-        )
+        visibility = 'friends' AND public.are_friends(auth.uid(), user_id)
     )
 );
 
@@ -47,17 +103,13 @@ CREATE POLICY "Users can delete own workouts" ON public.workouts FOR DELETE TO a
 DROP POLICY IF EXISTS "Reactions viewable by authenticated users" ON public.workout_reactions;
 DROP POLICY IF EXISTS "Reactions SELECT policy" ON public.workout_reactions;
 
--- Reactions viewable ONLY if user has access to view the parent workout
 CREATE POLICY "Reactions SELECT policy" ON public.workout_reactions FOR SELECT TO authenticated USING (
     EXISTS (
         SELECT 1 FROM public.workouts w
         WHERE w.id = workout_reactions.workout_id
         AND (
             w.user_id = auth.uid() OR (
-                w.visibility = 'friends' AND EXISTS (
-                    SELECT 1 FROM public.friends f
-                    WHERE f.user_id = auth.uid() AND f.friend_id = w.user_id
-                )
+                w.visibility = 'friends' AND public.are_friends(auth.uid(), w.user_id)
             )
         )
     )
@@ -70,10 +122,7 @@ CREATE POLICY "Users can insert own reactions" ON public.workout_reactions FOR I
         WHERE w.id = workout_reactions.workout_id
         AND (
             w.user_id = auth.uid() OR (
-                w.visibility = 'friends' AND EXISTS (
-                    SELECT 1 FROM public.friends f
-                    WHERE f.user_id = auth.uid() AND f.friend_id = w.user_id
-                )
+                w.visibility = 'friends' AND public.are_friends(auth.uid(), w.user_id)
             )
         )
     )
@@ -135,6 +184,10 @@ BEGIN
 END;
 $$;
 
+-- Restrict execution privileges on RPC
+REVOKE EXECUTE ON FUNCTION public.accept_friend_request(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.accept_friend_request(UUID) TO authenticated;
+
 -- Restrict direct client INSERT/UPDATE on friends table
 DROP POLICY IF EXISTS "Friends viewable by user" ON public.friends;
 DROP POLICY IF EXISTS "Friends SELECT policy" ON public.friends;
@@ -142,10 +195,8 @@ CREATE POLICY "Friends SELECT policy" ON public.friends FOR SELECT TO authentica
     auth.uid() = user_id OR auth.uid() = friend_id
 );
 
--- Note: No INSERT or UPDATE policy is exposed on public.friends to prevent arbitrary client creation.
-
 -- ==================================================
--- 4. FRIEND REQUEST SECURITY
+-- 4. FRIEND REQUEST SECURITY (NO RLS RECURSION)
 -- ==================================================
 DROP POLICY IF EXISTS "Friend requests viewable by participants" ON public.friend_requests;
 DROP POLICY IF EXISTS "Friend requests SELECT policy" ON public.friend_requests;
@@ -158,15 +209,8 @@ DROP POLICY IF EXISTS "Friend requests INSERT policy" ON public.friend_requests;
 CREATE POLICY "Friend requests INSERT policy" ON public.friend_requests FOR INSERT TO authenticated WITH CHECK (
     auth.uid() = sender_id AND
     sender_id <> receiver_id AND
-    NOT EXISTS (
-        SELECT 1 FROM public.friend_requests fr
-        WHERE (fr.sender_id = auth.uid() AND fr.receiver_id = friend_requests.receiver_id)
-           OR (fr.sender_id = friend_requests.receiver_id AND fr.receiver_id = auth.uid())
-    ) AND
-    NOT EXISTS (
-        SELECT 1 FROM public.friends f
-        WHERE f.user_id = auth.uid() AND f.friend_id = friend_requests.receiver_id
-    )
+    NOT public.has_existing_friend_request(sender_id, receiver_id) AND
+    NOT public.are_friends(sender_id, receiver_id)
 );
 
 DROP POLICY IF EXISTS "Users can update received request" ON public.friend_requests;
@@ -176,15 +220,12 @@ CREATE POLICY "Friend requests UPDATE policy" ON public.friend_requests FOR UPDA
 );
 
 -- ==================================================
--- 5. CHALLENGE VISIBILITY & MEMBERSHIP RLS
+-- 5. CHALLENGE VISIBILITY & MEMBERSHIP RLS (NO RLS RECURSION)
 -- ==================================================
 DROP POLICY IF EXISTS "Challenges viewable by authenticated users" ON public.challenges;
 DROP POLICY IF EXISTS "Challenges SELECT policy" ON public.challenges;
 CREATE POLICY "Challenges SELECT policy" ON public.challenges FOR SELECT TO authenticated USING (
-    creator_id = auth.uid() OR EXISTS (
-        SELECT 1 FROM public.challenge_members cm
-        WHERE cm.challenge_id = challenges.id AND cm.user_id = auth.uid()
-    )
+    creator_id = auth.uid() OR public.is_challenge_member(id, auth.uid())
 );
 
 DROP POLICY IF EXISTS "Authenticated users can create challenges" ON public.challenges;
@@ -196,13 +237,9 @@ CREATE POLICY "Challenges INSERT policy" ON public.challenges FOR INSERT TO auth
 DROP POLICY IF EXISTS "Challenge members viewable by all" ON public.challenge_members;
 DROP POLICY IF EXISTS "Challenge members SELECT policy" ON public.challenge_members;
 CREATE POLICY "Challenge members SELECT policy" ON public.challenge_members FOR SELECT TO authenticated USING (
-    user_id = auth.uid() OR EXISTS (
-        SELECT 1 FROM public.challenges c
-        WHERE c.id = challenge_members.challenge_id AND c.creator_id = auth.uid()
-    ) OR EXISTS (
-        SELECT 1 FROM public.challenge_members cm2
-        WHERE cm2.challenge_id = challenge_members.challenge_id AND cm2.user_id = auth.uid()
-    )
+    user_id = auth.uid() OR
+    public.is_challenge_creator(challenge_id, auth.uid()) OR
+    public.is_challenge_member(challenge_id, auth.uid())
 );
 
 DROP POLICY IF EXISTS "Users can join challenges" ON public.challenge_members;
@@ -214,7 +251,7 @@ CREATE POLICY "Challenge members INSERT policy" ON public.challenge_members FOR 
 );
 
 -- ==================================================
--- 6. AUTOMATIC PROFILE CREATION TRIGGER
+-- 6. AUTOMATIC PROFILE CREATION WITH USERNAME COLLISION HANDLING
 -- ==================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -238,26 +275,50 @@ BEGIN
     );
     v_avatar_url := NEW.raw_user_meta_data->>'avatar_url';
 
-    INSERT INTO public.profiles (
-        id,
-        username,
-        display_name,
-        avatar_url,
-        weekly_goal,
-        current_streak,
-        longest_streak,
-        total_xp
-    ) VALUES (
-        NEW.id,
-        v_username,
-        v_display_name,
-        v_avatar_url,
-        3,
-        0,
-        0,
-        0
-    )
-    ON CONFLICT (id) DO NOTHING;
+    BEGIN
+        INSERT INTO public.profiles (
+            id,
+            username,
+            display_name,
+            avatar_url,
+            weekly_goal,
+            current_streak,
+            longest_streak,
+            total_xp
+        ) VALUES (
+            NEW.id,
+            v_username,
+            v_display_name,
+            v_avatar_url,
+            3,
+            0,
+            0,
+            0
+        );
+    EXCEPTION WHEN unique_violation THEN
+        -- Handle username collision by appending a unique short suffix
+        v_username := v_username || '_' || substring(replace(gen_random_uuid()::text, '-', '') from 1 for 4);
+        INSERT INTO public.profiles (
+            id,
+            username,
+            display_name,
+            avatar_url,
+            weekly_goal,
+            current_streak,
+            longest_streak,
+            total_xp
+        ) VALUES (
+            NEW.id,
+            v_username,
+            v_display_name,
+            v_avatar_url,
+            3,
+            0,
+            0,
+            0
+        )
+        ON CONFLICT (id) DO NOTHING;
+    END;
 
     RETURN NEW;
 END;
@@ -278,7 +339,6 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-    -- Block client updates from modifying gamification fields directly
     IF (NEW.total_xp IS DISTINCT FROM OLD.total_xp OR
         NEW.current_streak IS DISTINCT FROM OLD.current_streak OR
         NEW.longest_streak IS DISTINCT FROM OLD.longest_streak) THEN
@@ -330,10 +390,5 @@ CREATE POLICY "Push subscriptions DELETE policy" ON public.push_subscriptions FO
 DROP POLICY IF EXISTS "User achievements viewable by all" ON public.user_achievements;
 DROP POLICY IF EXISTS "User achievements SELECT policy" ON public.user_achievements;
 CREATE POLICY "User achievements SELECT policy" ON public.user_achievements FOR SELECT TO authenticated USING (
-    auth.uid() = user_id OR EXISTS (
-        SELECT 1 FROM public.friends f
-        WHERE f.user_id = auth.uid() AND f.friend_id = user_achievements.user_id
-    )
+    auth.uid() = user_id OR public.are_friends(auth.uid(), user_id)
 );
-
--- Note: No client INSERT policy on notifications or user_achievements.
