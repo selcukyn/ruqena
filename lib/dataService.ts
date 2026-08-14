@@ -96,7 +96,13 @@ class DataService {
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.error('Error fetching feed workouts:', error)
+        console.error('Error fetching feed workouts:', {
+          message: error?.message,
+          code: error?.code,
+          details: error?.details,
+          hint: error?.hint,
+          status: (error as any)?.status,
+        })
         return []
       }
 
@@ -348,7 +354,13 @@ class DataService {
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.error('Error fetching challenges:', error)
+        console.error('Error fetching challenges:', {
+          message: error?.message,
+          code: error?.code,
+          details: error?.details,
+          hint: error?.hint,
+          status: (error as any)?.status,
+        })
         return []
       }
 
