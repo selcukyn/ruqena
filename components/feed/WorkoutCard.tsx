@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { EnrichedWorkout } from '@/types/app'
 import { ReactionBar } from './ReactionBar'
-import { Clock, MapPin, Zap, Calendar, Flame } from 'lucide-react'
+import { Clock, MapPin, Zap, Calendar, Flame, Lock } from 'lucide-react'
 
 const TYPE_ICONS: Record<string, string> = {
   Running: '🏃‍♂️',
@@ -81,6 +81,15 @@ export function WorkoutCard({ workout }: WorkoutCardProps) {
                 <Calendar className="w-3 h-3" />
                 <span>{dateFormatted}</span>
               </span>
+              {workout.visibility === 'private' && (
+                <>
+                  <span>·</span>
+                  <span className="flex items-center gap-1 text-amber-400/90 font-medium bg-amber-500/10 px-1.5 py-0.5 rounded text-[10px]">
+                    <Lock className="w-2.5 h-2.5" />
+                    <span>Sadece Ben</span>
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </Link>

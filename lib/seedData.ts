@@ -80,6 +80,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     notes: 'Akşam sahil koşusu harikaydı! Tempo gayet iyiydi 🔥',
     image_url: 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date().toISOString().split('T')[0],
+    visibility: 'friends',
     created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
     user: SEED_PROFILES[1],
     reactions: [
@@ -98,6 +99,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     notes: 'Güne huzurlu bir vinyasa akışı ile başladım 🧘‍♀️✨',
     image_url: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date().toISOString().split('T')[0],
+    visibility: 'friends',
     created_at: new Date(Date.now() - 5 * 3600000).toISOString(),
     user: SEED_PROFILES[2],
     reactions: [
@@ -115,6 +117,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     notes: 'Ağır bacak antrenmanı! Squat rekoru kırıldı 💪⚡️',
     image_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
+    visibility: 'friends',
     created_at: new Date(Date.now() - 22 * 3600000).toISOString(),
     user: SEED_PROFILES[3],
     reactions: [
@@ -132,6 +135,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     notes: 'Rüzgarlı havada harika tempolu bisiklet sürüşü 🚴‍♂️',
     image_url: 'https://images.unsplash.com/photo-1517649763962-0c623266010b?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date().toISOString().split('T')[0],
+    visibility: 'friends',
     created_at: new Date(Date.now() - 1 * 3600000).toISOString(),
     user: SEED_PROFILES[0],
     reactions: [
@@ -149,6 +153,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     notes: '3x3 Maç sonrası galibiyet pozu 🏀⚡️',
     image_url: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0],
+    visibility: 'friends',
     created_at: new Date(Date.now() - 48 * 3600000).toISOString(),
     user: SEED_PROFILES[4],
     reactions: [

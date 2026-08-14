@@ -106,6 +106,7 @@ class DataService {
     notes?: string | null
     image_url?: string | null
     workout_date?: string
+    visibility?: 'friends' | 'private'
   }): { workout: EnrichedWorkout; xpEarned: number; streakExtended: boolean } {
     const user = this.getCurrentUser()
     const xpEarned = calculateWorkoutXP(input)
@@ -129,6 +130,7 @@ class DataService {
       notes: input.notes || null,
       image_url: input.image_url || null,
       workout_date: input.workout_date || new Date().toISOString().split('T')[0],
+      visibility: input.visibility || 'friends',
       created_at: new Date().toISOString(),
       user: { ...user },
       reactions: [

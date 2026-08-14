@@ -57,6 +57,7 @@ export interface Workout {
   notes: string | null
   image_url: string | null
   workout_date: string
+  visibility: 'friends' | 'private'
   created_at: string
 }
 

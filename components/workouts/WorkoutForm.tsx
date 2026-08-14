@@ -54,6 +54,7 @@ export function WorkoutForm() {
         notes: notes.trim() || null,
         image_url: selectedPhoto || null,
         workout_date: workoutDate,
+        visibility: privacy,
       })
 
       // Trigger Celebration Confetti
