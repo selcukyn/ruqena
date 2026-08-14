@@ -1,4 +1,4 @@
-# RUQENA — Database Security & RLS Architecture (Sprint 1A Final Hardened)
+# RUQENA — Database Security & RLS Architecture (Sprint 1A Audit Final)
 
 This document details the hardened PostgreSQL database schema, Row Level Security (RLS) policies, RPC security, and recursion-free helper functions for the RUQENA MVP.
 
@@ -9,7 +9,7 @@ This document details the hardened PostgreSQL database schema, Row Level Securit
 | Table | RLS Enabled | SELECT Policy | INSERT Policy | UPDATE Policy | DELETE Policy |
 | :--- | :---: | :--- | :--- | :--- | :--- |
 | `public.profiles` | ✅ | Authenticated users | System Trigger Only (`handle_new_user`) | Owner (`auth.uid() = id`) | Denied |
-| `public.friend_requests` | ✅ | Participants (`sender_id` or `receiver_id`) | Controlled (`send_friend_request` RPC / strictly validated INSERT) | Denied (Handled via `respond_to_friend_request` RPC) | Denied |
+| `public.friend_requests` | ✅ | Participants (`sender_id` or `receiver_id`) | Denied (`send_friend_request` RPC only) | Denied (`respond_to_friend_request` RPC only) | Denied |
 | `public.friends` | ✅ | Friendship members (`user_id` or `friend_id`) | Denied (`respond_to_friend_request` RPC only) | Denied | Denied |
 | `public.workouts` | ✅ | Owner OR (accepted friend via `are_friends` AND `visibility = 'friends'`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) | Owner (`auth.uid() = user_id`) |
 | `public.workout_reactions` | ✅ | Allowed if parent workout is viewable by user | Owner (`auth.uid() = user_id`) & parent workout viewable | Denied | Owner (`auth.uid() = user_id`) |
@@ -24,41 +24,47 @@ This document details the hardened PostgreSQL database schema, Row Level Securit
 
 ## 🔑 2. Controlled Database RPCs & Security Model
 
-All sensitive state transitions are encapsulated in `SECURITY DEFINER` RPC functions with `SET search_path = public, pg_temp` and explicit execution grants:
-
 1. **`public.send_friend_request(p_receiver_id UUID) RETURNS UUID`**:
    * Validates non-self request, checks `are_friends()`, checks `has_existing_friend_request()`, and inserts pending request.
+   * Handles unique constraint violations cleanly with custom exception.
    * `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated;`
 
 2. **`public.respond_to_friend_request(p_request_id UUID, p_status TEXT) RETURNS VOID`**:
    * Authoritative handler for responding to requests (`'accepted'` or `'rejected'`).
+   * Uses `FOR UPDATE` row locking to prevent concurrent response race conditions.
    * Validates `auth.uid() = receiver_id` and current status is `'pending'`.
    * Atomically updates status and creates bidirectional friendship rows `(A → B)` and `(B → A)` in a single transaction if accepted.
    * `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated;`
 
 3. **`public.join_challenge(p_challenge_id UUID) RETURNS VOID`**:
    * Authoritative handler for joining challenges.
-   * Verifies challenge existence and inserts `auth.uid()` as a member with `ON CONFLICT DO NOTHING`.
+   * Verifies challenge existence, checks `CURRENT_DATE BETWEEN start_date AND end_date`, and verifies caller is creator OR accepted friend of creator.
+   * Inserts `auth.uid()` as a member with `ON CONFLICT DO NOTHING`.
    * `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated;`
 
 ---
 
-## 🛡️ 3. SECURITY DEFINER Helper Functions (Zero RLS Recursion)
+## 🛡️ 3. Helper Function Permissions
 
-All cross-table authorization queries are executed via helper functions:
-
-1. `public.is_challenge_creator(p_challenge_id UUID, p_user_id UUID)`
-2. `public.is_challenge_member(p_challenge_id UUID, p_user_id UUID)`
-3. `public.are_friends(p_user_a UUID, p_user_b UUID)`
-4. `public.has_existing_friend_request(p_user_a UUID, p_user_b UUID)`
-
-All helper functions have `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated;`.
+Helper functions (`is_challenge_creator`, `is_challenge_member`, `are_friends`, `has_existing_friend_request`) are executed strictly within database/RLS context:
+```sql
+REVOKE EXECUTE ON FUNCTION public.is_challenge_creator(UUID, UUID) FROM PUBLIC, authenticated;
+REVOKE EXECUTE ON FUNCTION public.is_challenge_member(UUID, UUID) FROM PUBLIC, authenticated;
+REVOKE EXECUTE ON FUNCTION public.are_friends(UUID, UUID) FROM PUBLIC, authenticated;
+REVOKE EXECUTE ON FUNCTION public.has_existing_friend_request(UUID, UUID) FROM PUBLIC, authenticated;
+```
+This prevents clients from invoking helper functions as arbitrary cross-user relationship discovery APIs.
 
 ---
 
-## 👤 4. Profile Username Collision & Bidirectional Request Integrity
-* **Username Collision**: `handle_new_user()` trigger catches PostgreSQL `unique_violation` exception on `public.profiles(username)` and appends a unique short 4-character suffix (e.g. `_a1b2`) to ensure registration transactions never fail.
-* **Bidirectional Request Uniqueness**: Indexed via `CREATE UNIQUE INDEX unique_bidirectional_friend_request ON public.friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id));`.
+## 📌 4. Indexes & Constraints
+* **Partial Pending Unique Index**:
+  ```sql
+  CREATE UNIQUE INDEX unique_bidirectional_pending_friend_request 
+  ON public.friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id))
+  WHERE status = 'pending';
+  ```
+  Allows users to re-request after a rejection while strictly blocking concurrent duplicate pending requests.
 
 ---
 
