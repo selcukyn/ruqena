@@ -1,9 +1,9 @@
 -- RUQENA Database Schema & RLS Hardening Migration
--- Sprint 1A: Database Security & RLS Hardening (Refactored to eliminate RLS recursion)
+-- Sprint 1A: Database Security & RLS Hardening (Final Security Fixes)
 -- Migration Timestamp: 20260814102000
 
 -- ==================================================
--- 0. SECURITY DEFINER HELPER FUNCTIONS (PREVENT RLS RECURSION)
+-- 0. SECURITY DEFINER HELPER FUNCTIONS (ZERO RLS RECURSION)
 -- ==================================================
 
 -- Helper 1: Check if a user is creator of a challenge
@@ -62,6 +62,19 @@ AS $$
            OR (sender_id = p_user_b AND receiver_id = p_user_a)
     );
 $$;
+
+-- Helper Function Permissions
+REVOKE EXECUTE ON FUNCTION public.is_challenge_creator(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_challenge_creator(UUID, UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.is_challenge_member(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_challenge_member(UUID, UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.are_friends(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.are_friends(UUID, UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.has_existing_friend_request(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.has_existing_friend_request(UUID, UUID) TO authenticated;
 
 -- ==================================================
 -- 1. WORKOUT PRIVACY & CONSTRAINTS
@@ -134,9 +147,58 @@ CREATE POLICY "Users can delete own reactions" ON public.workout_reactions FOR D
 );
 
 -- ==================================================
--- 3. ATOMIC FRIENDSHIP RPC & FRIENDSHIP RLS
+-- 3. FRIEND REQUEST SECURITY & ATOMIC RPCs
 -- ==================================================
-CREATE OR REPLACE FUNCTION public.accept_friend_request(p_request_id UUID)
+
+-- Enforce true bidirectional unique index on friend_requests (prevents A->B and B->A simultaneously)
+CREATE UNIQUE INDEX IF NOT EXISTS unique_bidirectional_friend_request 
+ON public.friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id));
+
+-- Drop obsolete RPC if it exists
+DROP FUNCTION IF EXISTS public.accept_friend_request(UUID);
+
+-- RPC 1: Send Friend Request
+CREATE OR REPLACE FUNCTION public.send_friend_request(p_receiver_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_new_id UUID;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'Unauthenticated caller';
+    END IF;
+
+    IF auth.uid() = p_receiver_id THEN
+        RAISE EXCEPTION 'Cannot send friend request to self';
+    END IF;
+
+    IF public.are_friends(auth.uid(), p_receiver_id) THEN
+        RAISE EXCEPTION 'Users are already friends';
+    END IF;
+
+    IF public.has_existing_friend_request(auth.uid(), p_receiver_id) THEN
+        RAISE EXCEPTION 'A friend request already exists between these users';
+    END IF;
+
+    INSERT INTO public.friend_requests (sender_id, receiver_id, status)
+    VALUES (auth.uid(), p_receiver_id, 'pending')
+    RETURNING id INTO v_new_id;
+
+    RETURN v_new_id;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.send_friend_request(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.send_friend_request(UUID) TO authenticated;
+
+-- RPC 2: Respond to Friend Request (Accept or Reject)
+CREATE OR REPLACE FUNCTION public.respond_to_friend_request(
+    p_request_id UUID,
+    p_status TEXT
+)
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -151,6 +213,10 @@ BEGIN
         RAISE EXCEPTION 'Unauthenticated caller';
     END IF;
 
+    IF p_status NOT IN ('accepted', 'rejected') THEN
+        RAISE EXCEPTION 'Invalid status response';
+    END IF;
+
     SELECT sender_id, receiver_id, status
     INTO v_sender_id, v_receiver_id, v_status
     FROM public.friend_requests
@@ -161,51 +227,48 @@ BEGIN
     END IF;
 
     IF v_receiver_id <> auth.uid() THEN
-        RAISE EXCEPTION 'Not authorized to accept this friend request';
+        RAISE EXCEPTION 'Not authorized to respond to this friend request';
     END IF;
 
     IF v_status <> 'pending' THEN
-        RAISE EXCEPTION 'Friend request is not in pending status';
+        RAISE EXCEPTION 'Friend request is no longer pending';
     END IF;
 
-    -- Atomically update request status
+    -- Update request status
     UPDATE public.friend_requests
-    SET status = 'accepted'
+    SET status = p_status
     WHERE id = p_request_id;
 
-    -- Create bidirectional friendship records
-    INSERT INTO public.friends (user_id, friend_id)
-    VALUES (v_sender_id, v_receiver_id)
-    ON CONFLICT (user_id, friend_id) DO NOTHING;
+    -- If accepted, create bidirectional friendship records atomically
+    IF p_status = 'accepted' THEN
+        INSERT INTO public.friends (user_id, friend_id)
+        VALUES (v_sender_id, v_receiver_id)
+        ON CONFLICT (user_id, friend_id) DO NOTHING;
 
-    INSERT INTO public.friends (user_id, friend_id)
-    VALUES (v_receiver_id, v_sender_id)
-    ON CONFLICT (user_id, friend_id) DO NOTHING;
+        INSERT INTO public.friends (user_id, friend_id)
+        VALUES (v_receiver_id, v_sender_id)
+        ON CONFLICT (user_id, friend_id) DO NOTHING;
+    END IF;
 END;
 $$;
 
--- Restrict execution privileges on RPC
-REVOKE EXECUTE ON FUNCTION public.accept_friend_request(UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.accept_friend_request(UUID) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.respond_to_friend_request(UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.respond_to_friend_request(UUID, TEXT) TO authenticated;
 
--- Restrict direct client INSERT/UPDATE on friends table
-DROP POLICY IF EXISTS "Friends viewable by user" ON public.friends;
-DROP POLICY IF EXISTS "Friends SELECT policy" ON public.friends;
-CREATE POLICY "Friends SELECT policy" ON public.friends FOR SELECT TO authenticated USING (
-    auth.uid() = user_id OR auth.uid() = friend_id
-);
-
--- ==================================================
--- 4. FRIEND REQUEST SECURITY (NO RLS RECURSION)
--- ==================================================
+-- RLS Policies for Friend Requests
 DROP POLICY IF EXISTS "Friend requests viewable by participants" ON public.friend_requests;
 DROP POLICY IF EXISTS "Friend requests SELECT policy" ON public.friend_requests;
 CREATE POLICY "Friend requests SELECT policy" ON public.friend_requests FOR SELECT TO authenticated USING (
     auth.uid() = sender_id OR auth.uid() = receiver_id
 );
 
+-- Remove direct client INSERT & UPDATE policies on friend_requests (handled securely via send_friend_request & respond_to_friend_request RPCs)
 DROP POLICY IF EXISTS "Users can send friend request" ON public.friend_requests;
 DROP POLICY IF EXISTS "Friend requests INSERT policy" ON public.friend_requests;
+DROP POLICY IF EXISTS "Users can update received request" ON public.friend_requests;
+DROP POLICY IF EXISTS "Friend requests UPDATE policy" ON public.friend_requests;
+
+-- Allow INSERT via send_friend_request or controlled client INSERT matching strict checks:
 CREATE POLICY "Friend requests INSERT policy" ON public.friend_requests FOR INSERT TO authenticated WITH CHECK (
     auth.uid() = sender_id AND
     sender_id <> receiver_id AND
@@ -213,14 +276,19 @@ CREATE POLICY "Friend requests INSERT policy" ON public.friend_requests FOR INSE
     NOT public.are_friends(sender_id, receiver_id)
 );
 
-DROP POLICY IF EXISTS "Users can update received request" ON public.friend_requests;
-DROP POLICY IF EXISTS "Friend requests UPDATE policy" ON public.friend_requests;
-CREATE POLICY "Friend requests UPDATE policy" ON public.friend_requests FOR UPDATE TO authenticated USING (
-    auth.uid() = receiver_id
+-- ==================================================
+-- 4. FRIENDSHIP RLS
+-- ==================================================
+DROP POLICY IF EXISTS "Friends viewable by user" ON public.friends;
+DROP POLICY IF EXISTS "Friends SELECT policy" ON public.friends;
+CREATE POLICY "Friends SELECT policy" ON public.friends FOR SELECT TO authenticated USING (
+    auth.uid() = user_id OR auth.uid() = friend_id
 );
 
+-- Note: No direct client INSERT/UPDATE policies on public.friends.
+
 -- ==================================================
--- 5. CHALLENGE VISIBILITY & MEMBERSHIP RLS (NO RLS RECURSION)
+-- 5. CHALLENGE VISIBILITY & JOIN RPC
 -- ==================================================
 DROP POLICY IF EXISTS "Challenges viewable by authenticated users" ON public.challenges;
 DROP POLICY IF EXISTS "Challenges SELECT policy" ON public.challenges;
@@ -234,6 +302,38 @@ CREATE POLICY "Challenges INSERT policy" ON public.challenges FOR INSERT TO auth
     creator_id = auth.uid() AND target_value > 0 AND end_date >= start_date
 );
 
+-- RPC: Join Challenge
+CREATE OR REPLACE FUNCTION public.join_challenge(p_challenge_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_creator_id UUID;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'Unauthenticated caller';
+    END IF;
+
+    SELECT creator_id INTO v_creator_id
+    FROM public.challenges
+    WHERE id = p_challenge_id;
+
+    IF v_creator_id IS NULL THEN
+        RAISE EXCEPTION 'Challenge not found';
+    END IF;
+
+    INSERT INTO public.challenge_members (challenge_id, user_id, progress)
+    VALUES (p_challenge_id, auth.uid(), 0)
+    ON CONFLICT (challenge_id, user_id) DO NOTHING;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.join_challenge(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.join_challenge(UUID) TO authenticated;
+
+-- RLS Policies for Challenge Members
 DROP POLICY IF EXISTS "Challenge members viewable by all" ON public.challenge_members;
 DROP POLICY IF EXISTS "Challenge members SELECT policy" ON public.challenge_members;
 CREATE POLICY "Challenge members SELECT policy" ON public.challenge_members FOR SELECT TO authenticated USING (
@@ -242,13 +342,9 @@ CREATE POLICY "Challenge members SELECT policy" ON public.challenge_members FOR 
     public.is_challenge_member(challenge_id, auth.uid())
 );
 
+-- Remove direct client INSERT policy on challenge_members (joining MUST be executed via join_challenge RPC)
 DROP POLICY IF EXISTS "Users can join challenges" ON public.challenge_members;
 DROP POLICY IF EXISTS "Challenge members INSERT policy" ON public.challenge_members;
-CREATE POLICY "Challenge members INSERT policy" ON public.challenge_members FOR INSERT TO authenticated WITH CHECK (
-    auth.uid() = user_id AND EXISTS (
-        SELECT 1 FROM public.challenges c WHERE c.id = challenge_members.challenge_id
-    )
-);
 
 -- ==================================================
 -- 6. AUTOMATIC PROFILE CREATION WITH USERNAME COLLISION HANDLING
