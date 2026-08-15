@@ -7,8 +7,9 @@ import { dataService } from '@/lib/dataService'
 
 import { useEffect } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter()
   const { profile: user, signOut, refreshProfile } = useAuth()
   const [bio, setBio] = useState(user?.bio || '')
@@ -24,9 +25,19 @@ export default function SettingsPage() {
     alert('Profil güncellendi!')
   }
 
+  const [loggingOut, setLoggingOut] = useState(false)
+
   const handleLogout = async () => {
-    await signOut()
-    router.push('/login')
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await signOut()
+      window.location.href = '/login'
+    } catch (err) {
+      console.error('Logout error:', err)
+      alert('Çıkış yapılırken bir sorun oluştu. Lütfen tekrar deneyin.')
+      setLoggingOut(false)
+    }
   }
 
   return (
@@ -90,12 +101,21 @@ export default function SettingsPage() {
         {/* Logout Button */}
         <button
           onClick={handleLogout}
-          className="w-full p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 font-bold text-xs flex items-center justify-center gap-2 transition-colors"
+          disabled={loggingOut}
+          className="w-full p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 font-bold text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
         >
           <LogOut className="w-4 h-4" />
-          <span>Çıkış Yap</span>
+          <span>{loggingOut ? 'Çıkış Yapılıyor...' : 'Çıkış Yap'}</span>
         </button>
       </div>
     </div>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    <ProtectedRoute>
+      <SettingsPageContent />
+    </ProtectedRoute>
   )
 }

@@ -3,7 +3,9 @@
 import { WorkoutForm } from '@/components/workouts/WorkoutForm'
 import { Activity } from 'lucide-react'
 
-export default function NewWorkoutPage() {
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
+
+function NewWorkoutPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -21,5 +23,13 @@ export default function NewWorkoutPage() {
         <WorkoutForm />
       </div>
     </div>
+  )
+}
+
+export default function NewWorkoutPage() {
+  return (
+    <ProtectedRoute>
+      <NewWorkoutPageContent />
+    </ProtectedRoute>
   )
 }

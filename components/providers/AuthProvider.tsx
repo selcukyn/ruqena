@@ -17,9 +17,15 @@ interface AuthContextType {
     email: string,
     pass: string,
     metadata: { username: string; display_name: string; avatar_url?: string }
-  ) => Promise<{ error: Error | null; user: User | null }>
+  ) => Promise<{ error: Error | null; user: User | null; session: Session | null }>
+  resendConfirmationEmail: (email: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
+}
+
+export function isOnboardingCompleted(profile: Profile | null): boolean {
+  if (!profile) return false
+  return profile.bio === 'ONBOARDED' || Boolean(profile.username && profile.display_name)
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -49,13 +55,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const syncSession = async () => {
+      if (!supabase) return
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setSession(session)
+        const u = session?.user || null
+        setUser(u)
+        await fetchProfileForUser(u)
+      } catch (err) {
+        console.error('Session sync error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
     // Initialize initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      const u = session?.user || null
-      setUser(u)
-      fetchProfileForUser(u).finally(() => setLoading(false))
-    })
+    syncSession()
 
     // Listen to Auth State changes
     const {
@@ -68,7 +84,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     })
 
+    // Handle BFCache (Back-Forward Cache) page restoration
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        syncSession()
+      }
+    }
+
+    window.addEventListener('pageshow', handlePageShow)
+
     return () => {
+      window.removeEventListener('pageshow', handlePageShow)
       subscription.unsubscribe()
     }
   }, [])
@@ -84,11 +110,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pass: string,
     metadata: { username: string; display_name: string; avatar_url?: string }
   ) => {
-    if (!supabase) return { error: new Error('Supabase is not configured'), user: null }
+    if (!supabase) return { error: new Error('Supabase is not configured'), user: null, session: null }
+    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
       options: {
+        emailRedirectTo: redirectUrl,
         data: {
           username: metadata.username,
           display_name: metadata.display_name,
@@ -96,16 +124,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       },
     })
-    return { error: error ? new Error(error.message) : null, user: data.user }
+    if (error) {
+      console.error('Supabase Auth signUp Error:', {
+        message: error.message,
+        status: (error as { status?: number }).status,
+        code: (error as { code?: string }).code,
+      })
+    }
+    return {
+      error: error ? (error as Error) : null,
+      user: data?.user || null,
+      session: data?.session || null,
+    }
+  }
+
+  const resendConfirmationEmail = async (email: string) => {
+    if (!supabase) return { error: new Error('Supabase is not configured') }
+    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: redirectUrl,
+      },
+    })
+    return { error: error ? new Error(error.message) : null }
   }
 
   const signOut = async () => {
-    if (supabase) {
-      await supabase.auth.signOut()
+    try {
+      if (supabase) {
+        const { error } = await supabase.auth.signOut()
+        if (error) {
+          console.error('Supabase Auth signOut error:', error.message)
+        }
+      }
+    } catch (err) {
+      console.error('Unexpected error during signOut:', err)
+    } finally {
+      setUser(null)
+      setSession(null)
+      setProfile(null)
     }
-    setUser(null)
-    setSession(null)
-    setProfile(null)
   }
 
   const refreshProfile = async () => {
@@ -124,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isConfigured: isSupabaseConfigured,
         signIn,
         signUp,
+        resendConfirmationEmail,
         signOut,
         refreshProfile,
       }}

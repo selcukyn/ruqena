@@ -1,5 +1,5 @@
 -- RUQENA Database Schema & RLS Hardening Migration
--- Sprint 1A: Internal RLS Schema Isolation & Privilege Hardening
+-- Sprint 1A: Internal RLS Schema Isolation & Privilege Hardening (Dependency-Safe Fix)
 -- Migration Timestamp: 20260814130000
 
 -- ==================================================
@@ -220,11 +220,13 @@ REVOKE EXECUTE ON FUNCTION public.join_challenge(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.join_challenge(UUID) TO authenticated;
 
 -- ==================================================
--- 4. HARDENED RLS POLICIES (USING DIRECT EXISTS & INTERNAL HELPERS)
+-- 4. HARDENED RLS POLICIES (REPLACING ALL LEGACY HELPER DEPENDENCIES)
 -- ==================================================
 
 -- A. WORKOUTS (Direct Non-Recursive EXISTS Query)
+DROP POLICY IF EXISTS "Workouts viewable by self and friends" ON public.workouts;
 DROP POLICY IF EXISTS "Workouts SELECT policy" ON public.workouts;
+
 CREATE POLICY "Workouts SELECT policy" ON public.workouts FOR SELECT TO authenticated USING (
     user_id = auth.uid() OR (
         visibility = 'friends' AND EXISTS (
@@ -234,8 +236,11 @@ CREATE POLICY "Workouts SELECT policy" ON public.workouts FOR SELECT TO authenti
     )
 );
 
--- B. WORKOUT REACTIONS (Direct Non-Recursive EXISTS Query)
+-- B. WORKOUT REACTIONS (Replacing SELECT and INSERT Policies Referencing legacy are_friends)
+DROP POLICY IF EXISTS "Reactions viewable by authenticated users" ON public.workout_reactions;
 DROP POLICY IF EXISTS "Reactions SELECT policy" ON public.workout_reactions;
+DROP POLICY IF EXISTS "Users can insert own reactions" ON public.workout_reactions;
+
 CREATE POLICY "Reactions SELECT policy" ON public.workout_reactions FOR SELECT TO authenticated USING (
     EXISTS (
         SELECT 1 FROM public.workouts w
@@ -251,14 +256,33 @@ CREATE POLICY "Reactions SELECT policy" ON public.workout_reactions FOR SELECT T
     )
 );
 
+CREATE POLICY "Users can insert own reactions" ON public.workout_reactions FOR INSERT TO authenticated WITH CHECK (
+    auth.uid() = user_id AND EXISTS (
+        SELECT 1 FROM public.workouts w
+        WHERE w.id = workout_reactions.workout_id
+        AND (
+            w.user_id = auth.uid() OR (
+                w.visibility = 'friends' AND EXISTS (
+                    SELECT 1 FROM public.friends f
+                    WHERE f.user_id = auth.uid() AND f.friend_id = w.user_id
+                )
+            )
+        )
+    )
+);
+
 -- C. CHALLENGES (Uses internal.is_challenge_member helper to break recursion)
+DROP POLICY IF EXISTS "Challenges viewable by authenticated users" ON public.challenges;
 DROP POLICY IF EXISTS "Challenges SELECT policy" ON public.challenges;
+
 CREATE POLICY "Challenges SELECT policy" ON public.challenges FOR SELECT TO authenticated USING (
     creator_id = auth.uid() OR internal.is_challenge_member(id)
 );
 
 -- D. CHALLENGE MEMBERS (Uses internal helpers to break recursion)
+DROP POLICY IF EXISTS "Challenge members viewable by all" ON public.challenge_members;
 DROP POLICY IF EXISTS "Challenge members SELECT policy" ON public.challenge_members;
+
 CREATE POLICY "Challenge members SELECT policy" ON public.challenge_members FOR SELECT TO authenticated USING (
     user_id = auth.uid() OR
     internal.is_challenge_creator(challenge_id) OR
@@ -266,7 +290,9 @@ CREATE POLICY "Challenge members SELECT policy" ON public.challenge_members FOR 
 );
 
 -- E. USER ACHIEVEMENTS (Direct Non-Recursive EXISTS Query)
+DROP POLICY IF EXISTS "User achievements viewable by all" ON public.user_achievements;
 DROP POLICY IF EXISTS "User achievements SELECT policy" ON public.user_achievements;
+
 CREATE POLICY "User achievements SELECT policy" ON public.user_achievements FOR SELECT TO authenticated USING (
     user_id = auth.uid() OR EXISTS (
         SELECT 1 FROM public.friends f
@@ -275,7 +301,7 @@ CREATE POLICY "User achievements SELECT policy" ON public.user_achievements FOR 
 );
 
 -- ==================================================
--- 5. SAFELY DROP OBSOLETE PUBLIC HELPERS (DEPENDENCY-FREE)
+-- 5. SAFELY DROP OBSOLETE PUBLIC HELPERS (DEPENDENCY-FREE, NO CASCADE)
 -- ==================================================
 DROP FUNCTION IF EXISTS public.is_challenge_creator(UUID, UUID);
 DROP FUNCTION IF EXISTS public.is_challenge_member(UUID, UUID);

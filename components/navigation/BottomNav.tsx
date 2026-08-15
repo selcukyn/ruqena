@@ -33,7 +33,10 @@ export function BottomNav() {
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#0d1320]/95 backdrop-blur-md border-t border-slate-800/80 px-2 py-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl">
       <div className="flex items-center justify-around max-w-lg mx-auto">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== '/home' && pathname.startsWith(item.href))
+          const isActive =
+            item.href === '/profile'
+              ? pathname === '/profile'
+              : pathname === item.href || (item.href !== '/home' && pathname.startsWith(item.href))
           const Icon = item.icon
 
           if (item.isCta) {

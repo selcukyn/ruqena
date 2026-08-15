@@ -3,20 +3,47 @@
 import { useParams } from 'next/navigation'
 import { dataService } from '@/lib/dataService'
 import { WorkoutCard } from '@/components/feed/WorkoutCard'
-import { Flame, Trophy, Activity, Target, UserCheck, ShieldCheck } from 'lucide-react'
+import { Flame, Trophy, Activity, Target, UserCheck, UserPlus, Clock, Check, ShieldCheck } from 'lucide-react'
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
-import { Profile } from '@/types/database'
+import { Profile, FriendRequest } from '@/types/database'
 import { EnrichedWorkout } from '@/types/app'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function UserProfilePage() {
+function UserProfilePageContent() {
   const params = useParams()
   const username = params?.username as string
-  const { user } = useAuth()
+  const { user: currentUser } = useAuth()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Friendship states
+  const [isFriend, setIsFriend] = useState(false)
+  const [hasOutgoingRequest, setHasOutgoingRequest] = useState(false)
+  const [incomingRequest, setIncomingRequest] = useState<FriendRequest | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const loadFriendshipStatus = async (targetUserId: string, currentUserId: string) => {
+    try {
+      const [friendsList, reqs] = await Promise.all([
+        dataService.getFriends(currentUserId),
+        dataService.getFriendRequests(currentUserId),
+      ])
+
+      const friendFound = friendsList.some((f) => f.id === targetUserId)
+      setIsFriend(friendFound)
+
+      const outgoing = reqs.outgoing.find((r) => r.receiver_id === targetUserId)
+      setHasOutgoingRequest(Boolean(outgoing))
+
+      const incoming = reqs.incoming.find((r) => r.sender_id === targetUserId)
+      setIncomingRequest(incoming || null)
+    } catch (err) {
+      console.error('Error loading friendship status:', err)
+    }
+  }
 
   useEffect(() => {
     async function loadData() {
@@ -27,6 +54,10 @@ export default function UserProfilePage() {
         if (targetProf) {
           const w = await dataService.getUserWorkouts(targetProf.id)
           setWorkouts(w)
+
+          if (currentUser?.id && currentUser.id !== targetProf.id) {
+            await loadFriendshipStatus(targetProf.id, currentUser.id)
+          }
         }
       } catch (e) {
         console.error(e)
@@ -35,7 +66,51 @@ export default function UserProfilePage() {
       }
     }
     loadData()
-  }, [username])
+  }, [username, currentUser?.id])
+
+  const handleSendFriendRequest = async () => {
+    if (!profile || !currentUser || actionLoading) return
+    setActionLoading(true)
+    try {
+      await dataService.sendFriendRequest(profile.id)
+      setHasOutgoingRequest(true)
+    } catch (err: any) {
+      console.error('Error sending friend request:', err)
+      alert(err.message || 'Arkadaşlık isteği gönderilemedi.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleAcceptFriendRequest = async () => {
+    if (!incomingRequest || actionLoading) return
+    setActionLoading(true)
+    try {
+      await dataService.respondToFriendRequest(incomingRequest.id, 'accepted')
+      setIsFriend(true)
+      setIncomingRequest(null)
+    } catch (err: any) {
+      console.error('Error accepting friend request:', err)
+      alert(err.message || 'Arkadaşlık isteği kabul edilemedi.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRemoveFriend = async () => {
+    if (!profile || actionLoading) return
+    if (!confirm('Arkadaşlıktan çıkarmak istediğinize emin misiniz?')) return
+    setActionLoading(true)
+    try {
+      await dataService.removeFriend(profile.id)
+      setIsFriend(false)
+    } catch (err: any) {
+      console.error('Error removing friend:', err)
+      alert(err.message || 'Arkadaşlıktan çıkarılamadı.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -55,7 +130,7 @@ export default function UserProfilePage() {
     )
   }
 
-  const isMe = user?.id === profile.id
+  const isMe = currentUser?.id === profile.id
 
   return (
     <div className="space-y-6">
@@ -85,10 +160,39 @@ export default function UserProfilePage() {
 
             {!isMe && (
               <div className="pt-2 flex justify-center sm:justify-start">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
-                  <UserCheck className="w-4 h-4" />
-                  <span>Arkadaşsınız</span>
-                </span>
+                {isFriend ? (
+                  <button
+                    onClick={handleRemoveFriend}
+                    disabled={actionLoading}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-400 transition-colors text-xs font-bold shadow-sm"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    <span>Arkadaşsınız</span>
+                  </button>
+                ) : incomingRequest ? (
+                  <button
+                    onClick={handleAcceptFriendRequest}
+                    disabled={actionLoading}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 text-xs font-extrabold shadow-lg shadow-emerald-500/20 hover:scale-105 transition-all disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>{actionLoading ? 'Kabul Ediliyor...' : 'İsteği Kabul Et'}</span>
+                  </button>
+                ) : hasOutgoingRequest ? (
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>İstek Gönderildi</span>
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleSendFriendRequest}
+                    disabled={actionLoading}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 text-xs font-extrabold shadow-lg shadow-emerald-500/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>{actionLoading ? 'Gönderiliyor...' : 'Arkadaş Ekle'}</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -131,12 +235,20 @@ export default function UserProfilePage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {workouts.map((w) => (
+            {workouts.map((w: any) => (
               <WorkoutCard key={w.id} workout={w} />
             ))}
           </div>
         )}
       </div>
     </div>
+  )
+}
+
+export default function UserProfilePage() {
+  return (
+    <ProtectedRoute>
+      <UserProfilePageContent />
+    </ProtectedRoute>
   )
 }

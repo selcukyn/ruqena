@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Trophy, Award, Users, Bell, User, Plus, Flame, Activity } from 'lucide-react'
+import { Home, Trophy, Award, Users, Bell, User, Plus, Flame, Activity, Settings } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { dataService } from '@/lib/dataService'
 
@@ -55,7 +55,10 @@ export function Sidebar() {
       {/* Main Nav Links */}
       <div className="flex-1 space-y-1">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== '/home' && pathname.startsWith(item.href))
+          const isActive =
+            item.href === '/profile'
+              ? pathname === '/profile'
+              : pathname === item.href || (item.href !== '/home' && pathname.startsWith(item.href))
           const Icon = item.icon
 
           return (
@@ -82,25 +85,33 @@ export function Sidebar() {
         })}
       </div>
 
-      {/* User Quick Info */}
-      <div className="pt-4 border-t border-slate-800/80">
+      {/* User Quick Info & Settings */}
+      <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between gap-1">
         <Link
           href="/profile"
-          className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-800/50 transition-colors"
+          className="flex-1 flex items-center gap-2.5 p-2 rounded-xl hover:bg-slate-800/50 transition-colors min-w-0"
         >
           <img
             src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
             alt={profile?.display_name || 'Kullanıcı'}
-            className="w-10 h-10 rounded-full object-cover border border-slate-700"
+            className="w-9 h-9 rounded-full object-cover border border-slate-700 shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{profile?.display_name || 'Giriş Yapılmadı'}</p>
-            <p className="text-xs text-slate-400 truncate">@{profile?.username || 'misafir'}</p>
+            <p className="text-xs font-semibold text-white truncate">{profile?.display_name || 'Giriş Yapılmadı'}</p>
+            <p className="text-[10px] text-slate-400 truncate">@{profile?.username || 'misafir'}</p>
           </div>
-          <div className="flex items-center gap-1 text-orange-400 font-bold text-xs bg-orange-500/10 px-2 py-1 rounded-lg border border-orange-500/20">
-            <Flame className="w-3.5 h-3.5 fill-orange-400 text-orange-400" />
+          <div className="flex items-center gap-1 text-orange-400 font-bold text-[10px] bg-orange-500/10 px-1.5 py-0.5 rounded-lg border border-orange-500/20 shrink-0">
+            <Flame className="w-3 h-3 fill-orange-400 text-orange-400" />
             <span>{profile?.current_streak ?? 0}d</span>
           </div>
+        </Link>
+
+        <Link
+          href="/settings"
+          title="Ayarlar & Çıkış Yap"
+          className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors shrink-0"
+        >
+          <Settings className="w-4.5 h-4.5 stroke-2" />
         </Link>
       </div>
     </aside>

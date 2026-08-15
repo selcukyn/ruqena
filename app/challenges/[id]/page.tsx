@@ -1,21 +1,24 @@
 'use client'
 
-import { useParams } from 'next/navigation'
-import { useState } from 'react'
-import { Trophy, Clock, Target, Users, Flame, Check, UserPlus } from 'lucide-react'
+import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { Trophy, Clock, Target, Users, Flame, Check, UserPlus, Trash2, LogOut, AlertCircle } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
-
-import { useEffect } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { EnrichedChallenge } from '@/types/app'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function ChallengeDetailPage() {
+function ChallengeDetailPageContent() {
+  const router = useRouter()
   const params = useParams()
   const id = params?.id as string
   const { user } = useAuth()
   const [challenge, setChallenge] = useState<EnrichedChallenge | null>(null)
   const [loading, setLoading] = useState(true)
   const [joinError, setJoinError] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false)
+  const [showConfirmLeave, setShowConfirmLeave] = useState(false)
 
   const reloadChallenge = async () => {
     if (!id) return
@@ -28,13 +31,45 @@ export default function ChallengeDetailPage() {
   }, [id])
 
   const handleJoin = async () => {
-    if (!challenge) return
+    if (!challenge || actionLoading) return
     setJoinError(null)
+    setActionLoading(true)
     try {
       await dataService.joinChallenge(challenge.id)
       await reloadChallenge()
     } catch (err: any) {
       setJoinError(err.message || 'Yarışa katılırken bir hata oluştu.')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleDeleteChallenge = async () => {
+    if (!challenge || actionLoading) return
+    setActionLoading(true)
+    try {
+      await dataService.deleteChallenge(challenge.id)
+      router.push('/challenges')
+    } catch (err: any) {
+      console.error('Error deleting challenge:', err)
+      setJoinError(err.message || 'Challenge silinirken bir hata oluştu.')
+      setActionLoading(false)
+      setShowConfirmDelete(false)
+    }
+  }
+
+  const handleLeaveChallenge = async () => {
+    if (!challenge || actionLoading) return
+    setActionLoading(true)
+    try {
+      await dataService.leaveChallenge(challenge.id)
+      await reloadChallenge()
+      setShowConfirmLeave(false)
+    } catch (err: any) {
+      console.error('Error leaving challenge:', err)
+      setJoinError(err.message || 'Challenge ayrılırken bir hata oluştu.')
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -57,13 +92,14 @@ export default function ChallengeDetailPage() {
   }
 
   const currentUserId = user?.id || ''
-  const isMember = challenge.is_user_member || challenge.members.some((m) => m.user_id === currentUserId)
+  const isCreator = currentUserId === challenge.creator_id
+  const isMember = challenge.is_user_member || challenge.members.some((m: any) => m.user_id === currentUserId)
 
   // Sort members by progress descending
-  const sortedMembers = [...challenge.members].sort((a, b) => b.progress - a.progress)
+  const sortedMembers = [...challenge.members].sort((a: any, b: any) => b.progress - a.progress)
   const leader = sortedMembers[0]
-  const userRank = sortedMembers.findIndex((m) => m.user_id === currentUserId) + 1
-  const userMember = sortedMembers.find((m) => m.user_id === currentUserId)
+  const userRank = sortedMembers.findIndex((m: any) => m.user_id === currentUserId) + 1
+  const userMember = sortedMembers.find((m: any) => m.user_id === currentUserId)
 
   // Motivational copy for current user
   let motivationalMessage = 'Harika gidiyorsun! Antrenmanlarına devam et.'
@@ -97,20 +133,81 @@ export default function ChallengeDetailPage() {
             )}
           </div>
 
-          {!isMember ? (
-            <button
-              onClick={handleJoin}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-emerald-500/20 hover:scale-105 transition-transform"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Yarışa Katıl</span>
-            </button>
-          ) : (
-            <span className="flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
-              <Check className="w-4 h-4 stroke-[3]" />
-              <span>Katıldın</span>
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {!isMember ? (
+              <button
+                onClick={handleJoin}
+                disabled={actionLoading}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-emerald-500/20 hover:scale-105 transition-transform disabled:opacity-50"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>{actionLoading ? 'Katılınıyor...' : 'Yarışa Katıl'}</span>
+              </button>
+            ) : isCreator ? (
+              <div>
+                {!showConfirmDelete ? (
+                  <button
+                    onClick={() => setShowConfirmDelete(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 text-xs font-bold transition-all"
+                    title="Challenge'ı Sil"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Challenge'ı Sil</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-rose-500/40 p-1.5 rounded-2xl shadow-xl">
+                    <button
+                      onClick={handleDeleteChallenge}
+                      disabled={actionLoading}
+                      className="px-2.5 py-1 rounded-xl bg-rose-500 text-white text-[11px] font-bold hover:bg-rose-600 transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading ? 'Siliniyor...' : 'Evet, Sil'}
+                    </button>
+                    <button
+                      onClick={() => setShowConfirmDelete(false)}
+                      className="px-2 py-1 rounded-xl bg-slate-800 text-slate-400 text-[11px] font-semibold hover:text-white transition-colors"
+                    >
+                      İptal
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                {!showConfirmLeave ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Katıldın</span>
+                    </span>
+                    <button
+                      onClick={() => setShowConfirmLeave(true)}
+                      className="p-1.5 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                      title="Challenge'dan Ayrıl"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-rose-500/40 p-1.5 rounded-2xl shadow-xl">
+                    <button
+                      onClick={handleLeaveChallenge}
+                      disabled={actionLoading}
+                      className="px-2.5 py-1 rounded-xl bg-rose-500 text-white text-[11px] font-bold hover:bg-rose-600 transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading ? 'Ayrılınıyor...' : 'Ayrıl'}
+                    </button>
+                    <button
+                      onClick={() => setShowConfirmLeave(false)}
+                      className="px-2 py-1 rounded-xl bg-slate-800 text-slate-400 text-[11px] font-semibold hover:text-white transition-colors"
+                    >
+                      İptal
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Info badges */}
@@ -132,13 +229,14 @@ export default function ChallengeDetailPage() {
         </div>
       </div>
 
-        {joinError && (
-          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
-            {joinError}
-          </div>
-        )}
+      {joinError && (
+        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{joinError}</span>
+        </div>
+      )}
 
-        {/* Motivational Alert Banner */}
+      {/* Motivational Alert Banner */}
       {isMember && (
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-2">
           <Flame className="w-5 h-5 fill-emerald-400 shrink-0" />
@@ -226,5 +324,13 @@ export default function ChallengeDetailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function ChallengeDetailPage() {
+  return (
+    <ProtectedRoute>
+      <ChallengeDetailPageContent />
+    </ProtectedRoute>
   )
 }

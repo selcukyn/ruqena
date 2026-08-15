@@ -1,17 +1,39 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Trophy, Plus, Clock, Users, ChevronRight, Target, Flame } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 import { EnrichedChallenge } from '@/types/app'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function ChallengesPage() {
+function ChallengesPageContent() {
   const [challenges, setChallenges] = useState<EnrichedChallenge[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    dataService.getChallenges().then(setChallenges)
+    let isMounted = true
+    dataService.getChallenges().then((chgs) => {
+      if (isMounted) {
+        setChallenges(chgs)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      isMounted = false
+    }
   }, [])
+
+  if (loading) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Yarışlar Yükleniyor...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -50,6 +72,16 @@ export default function ChallengesPage() {
             >
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div>
+                  {chg.creator && (
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <img
+                        src={chg.creator.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                        alt={chg.creator.display_name}
+                        className="w-5 h-5 rounded-full object-cover border border-slate-700"
+                      />
+                      <span className="text-[10px] text-slate-400 font-semibold">{chg.creator.display_name} başlattı</span>
+                    </div>
+                  )}
                   <h3 className="font-extrabold text-white text-base sm:text-lg mb-1">{chg.title}</h3>
                   <p className="text-xs text-slate-400">{chg.description}</p>
                 </div>
@@ -110,5 +142,13 @@ export default function ChallengesPage() {
         })}
       </div>
     </div>
+  )
+}
+
+export default function ChallengesPage() {
+  return (
+    <ProtectedRoute>
+      <ChallengesPageContent />
+    </ProtectedRoute>
   )
 }

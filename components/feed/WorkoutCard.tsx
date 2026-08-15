@@ -4,7 +4,9 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { EnrichedWorkout } from '@/types/app'
 import { ReactionBar } from './ReactionBar'
-import { Clock, MapPin, Zap, Calendar, Flame, Lock } from 'lucide-react'
+import { Clock, MapPin, Zap, Calendar, Flame, Lock, Trash2, AlertCircle } from 'lucide-react'
+import { useAuth } from '@/components/providers/AuthProvider'
+import { dataService } from '@/lib/dataService'
 
 const TYPE_ICONS: Record<string, string> = {
   Running: '🏃‍♂️',
@@ -34,10 +36,17 @@ const TYPE_TRANSLATIONS: Record<string, string> = {
 
 interface WorkoutCardProps {
   workout: EnrichedWorkout
+  onDelete?: (workoutId: string) => void
 }
 
-export function WorkoutCard({ workout }: WorkoutCardProps) {
+export function WorkoutCard({ workout, onDelete }: WorkoutCardProps) {
+  const { user } = useAuth()
   const [showImageModal, setShowImageModal] = useState(false)
+  const [imgError, setImgError] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false)
+
+  const isOwner = user?.id && user.id === workout.user_id
   const icon = TYPE_ICONS[workout.type] || '⚡'
   const title = TYPE_TRANSLATIONS[workout.type] || workout.type
 
@@ -47,8 +56,24 @@ export function WorkoutCard({ workout }: WorkoutCardProps) {
     minute: '2-digit',
   })
 
+  const handleDelete = async () => {
+    if (!isOwner || isDeleting) return
+    setIsDeleting(true)
+    try {
+      await dataService.deleteWorkout(workout.id)
+      if (onDelete) {
+        onDelete(workout.id)
+      }
+    } catch (err) {
+      console.error('Error deleting workout:', err)
+      alert('Antrenman silinirken bir hata oluştu.')
+      setIsDeleting(false)
+      setShowConfirmDelete(false)
+    }
+  }
+
   return (
-    <div className="glass-card glass-card-interactive rounded-3xl p-4 sm:p-5 mb-4 border border-slate-800/80 hover:border-slate-700/80 transition-all shadow-xl">
+    <div className="glass-card glass-card-interactive rounded-3xl p-4 sm:p-5 mb-4 border border-slate-800/80 hover:border-slate-700/80 transition-all shadow-xl relative">
       {/* Card Header */}
       <div className="flex items-center justify-between mb-3">
         <Link href={`/profile/${workout.user.username}`} className="flex items-center gap-3 group">
@@ -93,6 +118,40 @@ export function WorkoutCard({ workout }: WorkoutCardProps) {
             </div>
           </div>
         </Link>
+
+        {/* Delete button (Owner only) */}
+        {isOwner && (
+          <div className="relative">
+            {!showConfirmDelete ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowConfirmDelete(true)
+                }}
+                className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                title="Antrenmanı Sil"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-rose-500/30 p-1.5 rounded-2xl shadow-xl animate-in fade-in zoom-in-95">
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="px-2.5 py-1 rounded-xl bg-rose-500 text-white text-[11px] font-bold hover:bg-rose-600 transition-colors disabled:opacity-50"
+                >
+                  {isDeleting ? 'Siliniyor...' : 'Sil'}
+                </button>
+                <button
+                  onClick={() => setShowConfirmDelete(false)}
+                  className="px-2 py-1 rounded-xl bg-slate-800 text-slate-400 text-[11px] font-semibold hover:text-white transition-colors"
+                >
+                  İptal
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Workout Notes */}
@@ -103,13 +162,14 @@ export function WorkoutCard({ workout }: WorkoutCardProps) {
       )}
 
       {/* Workout Image Preview */}
-      {workout.image_url && (
+      {workout.image_url && !imgError && (
         <div className="relative rounded-2xl overflow-hidden mb-3 border border-slate-800 max-h-72 group">
           <img
             src={workout.image_url}
             alt="Workout photo"
             className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-300"
             onClick={() => setShowImageModal(true)}
+            onError={() => setImgError(true)}
           />
         </div>
       )}
@@ -146,7 +206,7 @@ export function WorkoutCard({ workout }: WorkoutCardProps) {
       <ReactionBar workoutId={workout.id} initialReactions={workout.reactions} />
 
       {/* Image Lightbox Modal */}
-      {showImageModal && workout.image_url && (
+      {showImageModal && workout.image_url && !imgError && (
         <div
           className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
           onClick={() => setShowImageModal(false)}

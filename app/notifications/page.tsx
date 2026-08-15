@@ -7,8 +7,9 @@ import { AppNotification } from '@/types/database'
 
 import { useEffect } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function NotificationsPage() {
+function NotificationsPageContent() {
   const { user } = useAuth()
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [pushEnabled, setPushEnabled] = useState(false)
@@ -23,6 +24,19 @@ export default function NotificationsPage() {
     if (!user) return
     await dataService.markAllNotificationsAsRead(user.id)
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+  }
+
+  const handleRespondChallenge = async (notifId: string, status: 'accepted' | 'rejected') => {
+    try {
+      await dataService.respondChallengeInvite(notifId, status)
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === notifId ? { ...n, action_status: status, is_read: true } : n
+        )
+      )
+    } catch (error: any) {
+      alert('İşlem başarısız: ' + error.message)
+    }
   }
 
   const handleTogglePush = () => {
@@ -136,6 +150,30 @@ export default function NotificationsPage() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-300">{notif.message}</p>
+                {notif.type === 'CHALLENGE_INVITE' && notif.action_status === 'pending' && (
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => handleRespondChallenge(notif.id, 'accepted')}
+                      className="px-3 py-1.5 bg-emerald-500 text-slate-950 rounded-xl text-xs font-bold transition-all hover:bg-emerald-400"
+                    >
+                      Kabul Et
+                    </button>
+                    <button
+                      onClick={() => handleRespondChallenge(notif.id, 'rejected')}
+                      className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition-all hover:bg-slate-700"
+                    >
+                      Reddet
+                    </button>
+                  </div>
+                )}
+                {notif.type === 'CHALLENGE_INVITE' && notif.action_status === 'accepted' && (
+                  <div className="mt-3 text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <CheckCheck className="w-4 h-4" /> Challenge'a katıldın.
+                  </div>
+                )}
+                {notif.type === 'CHALLENGE_INVITE' && notif.action_status === 'rejected' && (
+                  <div className="mt-3 text-xs font-bold text-slate-500">Challenge daveti reddedildi.</div>
+                )}
               </div>
 
               {!notif.is_read && (
@@ -146,5 +184,13 @@ export default function NotificationsPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function NotificationsPage() {
+  return (
+    <ProtectedRoute>
+      <NotificationsPageContent />
+    </ProtectedRoute>
   )
 }

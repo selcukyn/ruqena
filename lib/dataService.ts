@@ -45,13 +45,20 @@ class DataService {
     const { total_xp, current_streak, longest_streak, id, ...allowedUpdates } = data as any
 
     if (isSupabaseConfigured && supabase) {
+      const currentAuthUser = (await supabase.auth.getUser()).data.user
+      const effectiveUserId = (currentAuthUser?.id && currentAuthUser.id !== 'usr_me') ? currentAuthUser.id : userId
+
+      if (!effectiveUserId || effectiveUserId === 'usr_me') {
+        throw new Error('User is not authenticated')
+      }
+
       const { data: updated, error } = await supabase
         .from('profiles')
         .update({
           ...allowedUpdates,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', userId)
+        .eq('id', effectiveUserId)
         .select()
         .single()
 
@@ -66,6 +73,9 @@ class DataService {
 
   async getAllProfiles(): Promise<Profile[]> {
     if (isSupabaseConfigured && supabase) {
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) return []
+
       const { data, error } = await supabase.from('profiles').select('*')
       if (error) throw new Error(error.message)
       return data || []
@@ -75,6 +85,9 @@ class DataService {
 
   async getProfileByUsername(username: string): Promise<Profile | null> {
     if (isSupabaseConfigured && supabase) {
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) return null
+
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -87,22 +100,55 @@ class DataService {
     return this.localProfiles.find((p) => p.username.toLowerCase() === username.toLowerCase()) || null
   }
 
+  async searchProfiles(query: string, currentUserId?: string): Promise<Profile[]> {
+    const cleanQuery = query.trim().toLowerCase()
+    if (!cleanQuery) return []
+
+    if (isSupabaseConfigured && supabase) {
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) return []
+
+      let queryBuilder = supabase
+        .from('profiles')
+        .select('*')
+        .or(`username.ilike.%${cleanQuery}%,display_name.ilike.%${cleanQuery}%`)
+
+      if (currentUserId) {
+        queryBuilder = queryBuilder.neq('id', currentUserId)
+      }
+
+      const { data, error } = await queryBuilder.limit(20)
+      if (error) throw new Error(error.message)
+      return data || []
+    }
+
+    return this.localProfiles.filter(
+      (p) =>
+        (!currentUserId || p.id !== currentUserId) &&
+        (p.username.toLowerCase().includes(cleanQuery) ||
+          p.display_name.toLowerCase().includes(cleanQuery))
+    )
+  }
+
   // --- WORKOUTS & FEED ---
   async getFeedWorkouts(): Promise<EnrichedWorkout[]> {
     if (isSupabaseConfigured && supabase) {
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) {
+        return []
+      }
+
       const { data, error } = await supabase
         .from('workouts')
         .select('*, user:profiles!workouts_user_id_fkey(*), reactions:workout_reactions(*)')
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.error('Error fetching feed workouts:', {
-          message: error?.message,
-          code: error?.code,
-          details: error?.details,
-          hint: error?.hint,
-          status: (error as any)?.status,
-        })
+        console.error('Error fetching feed workouts:', error)
+        console.error(
+          'Feed error details:',
+          JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+        )
         return []
       }
 
@@ -169,10 +215,13 @@ class DataService {
     const xpEarned = calculateWorkoutXP(input)
 
     if (isSupabaseConfigured && supabase) {
+      const currentAuthUser = (await supabase.auth.getUser()).data.user
+      const effectiveUserId = (currentAuthUser?.id && currentAuthUser.id !== 'usr_me') ? currentAuthUser.id : userId
+
       const { data: inserted, error } = await supabase
         .from('workouts')
         .insert({
-          user_id: userId,
+          user_id: effectiveUserId,
           type: input.type,
           duration_minutes: Number(input.duration_minutes),
           distance_km: input.distance_km ? Number(input.distance_km) : null,
@@ -328,6 +377,13 @@ class DataService {
     return this.localProfiles.filter((p) => p.id !== userId)
   }
 
+  async removeFriend(friendId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('remove_friend', { p_friend_id: friendId })
+      if (error) throw new Error(error.message)
+    }
+  }
+
   async getFriendRequests(userId: string): Promise<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }> {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
@@ -348,19 +404,22 @@ class DataService {
   // --- CHALLENGES & RPC JOIN ---
   async getChallenges(): Promise<EnrichedChallenge[]> {
     if (isSupabaseConfigured && supabase) {
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) {
+        return []
+      }
+
       const { data, error } = await supabase
         .from('challenges')
         .select('*, creator:profiles!challenges_creator_id_fkey(*), members:challenge_members(*, user:profiles(*))')
         .order('created_at', { ascending: false })
 
       if (error) {
-        console.error('Error fetching challenges:', {
-          message: error?.message,
-          code: error?.code,
-          details: error?.details,
-          hint: error?.hint,
-          status: (error as any)?.status,
-        })
+        console.error('Error fetching challenges:', error)
+        console.error(
+          'Challenges error details:',
+          JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+        )
         return []
       }
 
@@ -407,10 +466,13 @@ class DataService {
     }
   ): Promise<EnrichedChallenge> {
     if (isSupabaseConfigured && supabase) {
+      const currentAuthUser = (await supabase.auth.getUser()).data.user
+      const effectiveCreatorId = (currentAuthUser?.id && currentAuthUser.id !== 'usr_me') ? currentAuthUser.id : creatorId
+
       const { data, error } = await supabase
         .from('challenges')
         .insert({
-          creator_id: creatorId,
+          creator_id: effectiveCreatorId,
           title: input.title,
           description: input.description || null,
           challenge_type: input.challenge_type,
@@ -494,6 +556,65 @@ class DataService {
     }
   }
 
+  async inviteToChallenge(challengeId: string, inviteeId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('invite_to_challenge', {
+        p_challenge_id: challengeId,
+        p_invitee_id: inviteeId,
+      })
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  async respondChallengeInvite(notificationId: string, status: 'accepted' | 'rejected'): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('respond_challenge_invite', {
+        p_notification_id: notificationId,
+        p_status: status,
+      })
+      if (error) throw new Error(error.message)
+    } else {
+      // Local fallback: just find and mark as read/status
+      const n = this.localNotifications.find((x) => x.id === notificationId)
+      if (n) {
+        n.action_status = status
+        n.is_read = true
+      }
+    }
+  }
+
+  async deleteChallenge(challengeId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error: rpcError } = await supabase.rpc('delete_challenge', {
+        p_challenge_id: challengeId,
+      })
+      if (rpcError) {
+        const { error: directError } = await supabase.from('challenges').delete().eq('id', challengeId)
+        if (directError) throw new Error(rpcError.message || directError.message)
+      }
+      return
+    }
+
+    this.localChallenges = this.localChallenges.filter((c) => c.id !== challengeId)
+  }
+
+  async leaveChallenge(challengeId: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.rpc('leave_challenge', {
+        p_challenge_id: challengeId,
+      })
+      if (error) throw new Error(error.message)
+      return
+    }
+
+    const currentUserId = this.localCurrentUserId
+    const chg = this.localChallenges.find((c) => c.id === challengeId)
+    if (chg) {
+      chg.members = chg.members.filter((m) => m.user_id !== currentUserId && m.user_id !== 'usr_me')
+      chg.is_user_member = false
+    }
+  }
+
   // --- LEADERBOARD ---
   async getLeaderboard(period: 'weekly' | 'monthly' | 'alltime'): Promise<LeaderboardEntry[]> {
     const profiles = await this.getAllProfiles()
@@ -522,6 +643,10 @@ class DataService {
   // --- NOTIFICATIONS (READ & UPDATE ONLY — NO CLIENT INSERT) ---
   async getNotifications(userId: string): Promise<AppNotification[]> {
     if (isSupabaseConfigured && supabase) {
+      if (!userId) return []
+      const session = (await supabase.auth.getSession()).data.session
+      if (!session?.user) return []
+
       const { data, error } = await supabase
         .from('notifications')
         .select('*')

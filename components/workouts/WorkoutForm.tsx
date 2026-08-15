@@ -23,7 +23,7 @@ const WORKOUT_TYPES: { type: WorkoutType; label: string; icon: string; bg: strin
 const SAMPLE_PHOTOS = [
   { label: 'Koşu Yolu', url: 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80' },
   { label: 'Salonda Spor', url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&auto=format&fit=crop&q=80' },
-  { label: 'Bisiklet Rotası', url: 'https://images.unsplash.com/photo-1517649763962-0c623266010b?w=800&auto=format&fit=crop&q=80' },
+  { label: 'Bisiklet Rotası', url: 'https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=800&auto=format&fit=crop&q=80' },
   { label: 'Yoga Akışı', url: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?w=800&auto=format&fit=crop&q=80' },
 ]
 
@@ -48,7 +48,7 @@ export function WorkoutForm() {
     e.preventDefault()
     setLoading(true)
 
-    const userId = user?.id || 'usr_me'
+    const userId = user?.id || ''
 
     try {
       const result = await dataService.createWorkout(userId, {

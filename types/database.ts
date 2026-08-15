@@ -113,6 +113,7 @@ export interface AppNotification {
   message: string
   reference_id: string | null
   is_read: boolean
+  action_status?: 'pending' | 'accepted' | 'rejected'
   created_at: string
 }
 

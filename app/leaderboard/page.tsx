@@ -1,22 +1,42 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Award, Flame, Trophy, Crown, TrendingUp } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 
-import { useEffect } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { LeaderboardEntry } from '@/types/app'
 
-export default function LeaderboardPage() {
-  const { user } = useAuth()
+function LeaderboardPageContent() {
+  const { profile: user } = useAuth()
   const [period, setPeriod] = useState<'weekly' | 'monthly' | 'alltime'>('weekly')
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    dataService.getLeaderboard(period).then(setLeaderboard)
+    let isMounted = true
+    dataService.getLeaderboard(period).then((lb) => {
+      if (isMounted) {
+        setLeaderboard(lb)
+        setLoading(false)
+      }
+    })
+    return () => {
+      isMounted = false
+    }
   }, [period])
+
+  if (loading) {
+    return (
+      <div className="py-12 text-center text-slate-400 space-y-3">
+        <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs font-semibold">Liderlik Tablosu Yükleniyor...</p>
+      </div>
+    )
+  }
 
   const currentUserId = user?.id || ''
   const firstPlace = leaderboard[0]
@@ -187,5 +207,13 @@ export default function LeaderboardPage() {
         })}
       </div>
     </div>
+  )
+}
+
+export default function LeaderboardPage() {
+  return (
+    <ProtectedRoute>
+      <LeaderboardPageContent />
+    </ProtectedRoute>
   )
 }

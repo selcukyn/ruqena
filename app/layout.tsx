@@ -1,9 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
-import { Sidebar } from '@/components/navigation/Sidebar'
-import { BottomNav } from '@/components/navigation/BottomNav'
-import { Header } from '@/components/navigation/Header'
-
+import { ClientLayoutShell } from '@/components/navigation/ClientLayoutShell'
 import { AuthProvider } from '@/components/providers/AuthProvider'
 
 export const metadata: Metadata = {
@@ -37,24 +34,7 @@ export default function RootLayout({
       </head>
       <body className="bg-[#090d16] text-slate-100 min-h-screen antialiased selection:bg-emerald-500 selection:text-slate-950">
         <AuthProvider>
-          <div className="flex min-h-screen">
-            {/* Desktop Navigation */}
-            <Sidebar />
-
-            {/* Main App Content Area */}
-            <div className="flex-1 md:pl-64 flex flex-col min-h-screen">
-              {/* Mobile Header */}
-              <Header />
-
-              {/* Page Content */}
-              <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-4 md:py-6 pb-24 md:pb-8">
-                {children}
-              </main>
-            </div>
-          </div>
-
-          {/* Mobile Navigation Bar */}
-          <BottomNav />
+          <ClientLayoutShell>{children}</ClientLayoutShell>
         </AuthProvider>
 
         {/* Register PWA Service Worker */}

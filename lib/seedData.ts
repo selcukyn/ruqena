@@ -133,7 +133,7 @@ export const SEED_WORKOUTS: EnrichedWorkout[] = [
     distance_km: 18.2,
     calories: 440,
     notes: 'Rüzgarlı havada harika tempolu bisiklet sürüşü 🚴‍♂️',
-    image_url: 'https://images.unsplash.com/photo-1517649763962-0c623266010b?w=800&auto=format&fit=crop&q=80',
+    image_url: 'https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=800&auto=format&fit=crop&q=80',
     workout_date: new Date().toISOString().split('T')[0],
     visibility: 'friends',
     created_at: new Date(Date.now() - 1 * 3600000).toISOString(),

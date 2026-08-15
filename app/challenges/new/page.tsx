@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Trophy, Calendar, Target, ArrowRight } from 'lucide-react'
+import { Trophy, Calendar, Target, ArrowRight, Users } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
-import { ChallengeType } from '@/types/database'
+import { ChallengeType, Profile } from '@/types/database'
 
 const CHALLENGE_TYPES: { type: ChallengeType; label: string; icon: string; unit: string }[] = [
   { type: 'count', label: 'Antrenman Sayısı', icon: '🏋️‍♂️', unit: 'Antrenman' },
@@ -14,8 +14,9 @@ const CHALLENGE_TYPES: { type: ChallengeType; label: string; icon: string; unit:
 ]
 
 import { useAuth } from '@/components/providers/AuthProvider'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function NewChallengePage() {
+function NewChallengePageContent() {
   const router = useRouter()
   const { user } = useAuth()
   const [title, setTitle] = useState('')
@@ -27,13 +28,27 @@ export default function NewChallengePage() {
     new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
   )
 
+  const [friends, setFriends] = useState<Profile[]>([])
+  const [selectedFriends, setSelectedFriends] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (user?.id) {
+      dataService.getFriends(user.id).then(setFriends).catch(console.error)
+    }
+  }, [user?.id])
+
+  const toggleFriend = (id: string) => {
+    setSelectedFriends((prev) =>
+      prev.includes(id) ? prev.filter((fid) => fid !== id) : [...prev, id]
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
-    const creatorId = user?.id || 'usr_me'
+    const creatorId = user?.id || ''
 
     try {
       const newChg = await dataService.createChallenge(creatorId, {
@@ -44,6 +59,12 @@ export default function NewChallengePage() {
         start_date: startDate,
         end_date: endDate,
       })
+      
+      // Invite selected friends
+      for (const friendId of selectedFriends) {
+        await dataService.inviteToChallenge(newChg.id, friendId).catch(console.error)
+      }
+
       setLoading(false)
       router.push(`/challenges/${newChg.id}`)
     } catch (err) {
@@ -162,6 +183,42 @@ export default function NewChallengePage() {
           </div>
         </div>
 
+        {/* Invite Friends */}
+        {friends.length > 0 && (
+          <div className="pt-2">
+            <label className="block text-xs font-semibold text-slate-300 mb-2.5 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-emerald-400" />
+              <span>Arkadaşlarını Davet Et</span>
+            </label>
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
+              {friends.map((friend) => {
+                const isSelected = selectedFriends.includes(friend.id)
+                return (
+                  <button
+                    key={friend.id}
+                    type="button"
+                    onClick={() => toggleFriend(friend.id)}
+                    className={`flex-shrink-0 flex flex-col items-center gap-1.5 transition-all ${
+                      isSelected ? 'opacity-100 scale-105' : 'opacity-50 hover:opacity-80'
+                    }`}
+                  >
+                    <div className={`relative p-0.5 rounded-full ${isSelected ? 'bg-gradient-to-tr from-emerald-500 to-teal-400' : 'bg-transparent'}`}>
+                      <img
+                        src={friend.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
+                        alt={friend.display_name}
+                        className="w-12 h-12 rounded-full object-cover border-2 border-[#121826]"
+                      />
+                    </div>
+                    <span className="text-[10px] font-semibold text-white max-w-[56px] truncate">
+                      {friend.display_name.split(' ')[0]}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Submit */}
         <button
           type="submit"
@@ -173,5 +230,13 @@ export default function NewChallengePage() {
         </button>
       </form>
     </div>
+  )
+}
+
+export default function NewChallengePage() {
+  return (
+    <ProtectedRoute>
+      <NewChallengePageContent />
+    </ProtectedRoute>
   )
 }

@@ -1,19 +1,20 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Flame, Trophy, ChevronRight, Activity, Sparkles, TrendingUp } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 import { EnrichedWorkout, EnrichedChallenge } from '@/types/app'
-import { Profile } from '@/types/database'
 import { WorkoutCard } from '@/components/feed/WorkoutCard'
 import { EmptyState } from '@/components/common/EmptyState'
 import { getMotivationalCopy } from '@/lib/gamification'
-
 import { useAuth } from '@/components/providers/AuthProvider'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-export default function HomePage() {
-  const { profile: user, loading: authLoading } = useAuth()
+function HomePageContent() {
+  const router = useRouter()
+  const { profile: user } = useAuth()
   const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
   const [challenges, setChallenges] = useState<EnrichedChallenge[]>([])
   const [dataLoading, setDataLoading] = useState(true)
@@ -42,7 +43,7 @@ export default function HomePage() {
     }
   }, [])
 
-  if (authLoading || dataLoading) {
+  if (dataLoading) {
     return (
       <div className="py-12 text-center text-slate-400 space-y-3">
         <div className="w-8 h-8 mx-auto border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -51,92 +52,78 @@ export default function HomePage() {
     )
   }
 
-  if (!user) return null
-
-  // Calculate user weekly progress
-  const userWeeklyWorkouts = workouts.filter((w) => {
-    if (w.user_id !== user.id) return false
-    const wDate = new Date(w.created_at)
-    const now = new Date()
-    const diffDays = Math.floor((now.getTime() - wDate.getTime()) / (1000 * 3600 * 24))
-    return diffDays < 7
+  const motivationalMsg = getMotivationalCopy({
+    weeklyCount: workouts.length,
+    weeklyGoal: user?.weekly_goal || 3,
+    streak: user?.current_streak || 0,
   })
 
-  const weeklyCount = userWeeklyWorkouts.length
-  const weeklyGoal = user.weekly_goal || 4
-  const progressPercent = Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100))
-
   return (
-    <div className="space-y-6">
-      {/* User Greeting & Weekly Progress Card */}
-      <section className="relative overflow-hidden glass-card rounded-3xl p-5 sm:p-6 border border-emerald-500/20 shadow-2xl bg-gradient-to-br from-emerald-950/40 via-[#121826] to-[#121826]">
-        <div className="flex items-center justify-between mb-4">
+    <div className="space-y-6 sm:space-y-8">
+      {/* Top Banner / Welcome */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-[#121826] to-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl">
+        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Selam {user.display_name.split(' ')[0]} 👋
-            </h1>
-            <p className="text-xs text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>{getMotivationalCopy({ weeklyCount, weeklyGoal, streak: user.current_streak })}</span>
+              <span>Hoş Geldin, {user?.display_name || 'Sporcu'}</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              Bugün ne çalışıyoruz? 💪
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md">
+              {motivationalMsg}
             </p>
           </div>
 
           <Link
             href="/workouts/new"
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-emerald-500/25 hover:scale-105 active:scale-95 transition-all"
+            className="self-start sm:self-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span className="hidden sm:inline">Antrenman Ekle</span>
+            <Plus className="w-5 h-5 stroke-[2.5]" />
+            <span>Antrenman Ekle</span>
           </Link>
         </div>
 
-        {/* Progress Bar Container */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs font-semibold">
-            <span className="text-slate-300">Bu Haftaki Hedef</span>
-            <span className="text-emerald-400 font-bold">
-              {weeklyCount} / {weeklyGoal} Antrenman (%{progressPercent})
+        {/* Stats Strip */}
+        <div className="mt-6 pt-6 border-t border-slate-800/80 grid grid-cols-3 gap-2 sm:gap-4 text-center">
+          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/60">
+            <span className="text-[10px] sm:text-xs text-slate-400 block font-medium">Seri ⚡</span>
+            <span className="text-lg sm:text-xl font-black text-amber-400 flex items-center justify-center gap-1">
+              <Flame className="w-4 h-4 fill-amber-400 text-amber-400" />
+              {user?.current_streak || 0} Gün
             </span>
           </div>
-          <div className="w-full h-3 bg-slate-900/80 rounded-full overflow-hidden p-0.5 border border-slate-800">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500 shadow-md shadow-emerald-500/30"
-              style={{ width: `${progressPercent}%` }}
-            />
+
+          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/60">
+            <span className="text-[10px] sm:text-xs text-slate-400 block font-medium">Haftalık Hedef</span>
+            <span className="text-lg sm:text-xl font-black text-emerald-400">
+              {user?.weekly_goal || 3} Gün
+            </span>
+          </div>
+
+          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/60">
+            <span className="text-[10px] sm:text-xs text-slate-400 block font-medium">Toplam XP</span>
+            <span className="text-lg sm:text-xl font-black text-teal-400">
+              {user?.total_xp || 0}
+            </span>
           </div>
         </div>
+      </div>
 
-        {/* Quick Streak & XP Badges Row */}
-        <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-800/80 text-xs">
-          <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-orange-500/10 border border-orange-500/20">
-            <Flame className="w-5 h-5 fill-orange-400 text-orange-400 flame-glow" />
-            <div>
-              <span className="text-orange-400 font-bold block">{user.current_streak} Gün Seri</span>
-              <span className="text-[10px] text-slate-400">En uzun: {user.longest_streak} gün</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2.5 p-2.5 rounded-2xl bg-purple-500/10 border border-purple-500/20">
-            <TrendingUp className="w-5 h-5 text-purple-400" />
-            <div>
-              <span className="text-purple-400 font-bold block">{user.total_xp} XP</span>
-              <span className="text-[10px] text-slate-400">Seviye {Math.floor(user.total_xp / 100) + 1}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Active Challenges Preview Section */}
+      {/* Active Challenges Widget */}
       {challenges.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-extrabold text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold text-slate-300 flex items-center gap-2">
               <Trophy className="w-4 h-4 text-amber-400" />
-              <span>Aktif Yarışlar</span>
+              <span>Aktif Yarışlar & Challenge</span>
             </h2>
             <Link
               href="/challenges"
-              className="text-xs font-semibold text-emerald-400 hover:underline flex items-center gap-0.5"
+              className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
             >
               <span>Tümünü Gör</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -148,21 +135,28 @@ export default function HomePage() {
               <Link
                 key={chg.id}
                 href={`/challenges/${chg.id}`}
-                className="glass-card glass-card-interactive rounded-2xl p-4 border border-slate-800/80 hover:border-emerald-500/30 flex flex-col justify-between"
+                className="group p-4 rounded-2xl bg-[#121826]/80 border border-slate-800 hover:border-slate-700 transition-all duration-200 block"
               >
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-white truncate">{chg.title}</span>
-                    <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                      {chg.days_remaining} gün kaldı
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-emerald-400 tracking-wider uppercase bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                      {chg.challenge_type === 'count'
+                        ? 'Antrenman Sayısı'
+                        : chg.challenge_type === 'duration'
+                        ? 'Süre Hedefi'
+                        : 'Mesafe Hedefi'}
                     </span>
+                    <h3 className="text-sm font-bold text-white mt-1 group-hover:text-emerald-400 transition-colors">
+                      {chg.title}
+                    </h3>
                   </div>
-                  <p className="text-[11px] text-slate-400 line-clamp-1">{chg.description}</p>
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
+                    {chg.days_remaining} gün kaldı
+                  </span>
                 </div>
-
-                <div className="mt-3 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">{chg.members.length} Katılımcı</span>
-                  <span className="text-emerald-400 font-semibold">Sen: {chg.user_progress} / {chg.target_value}</span>
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+                  <span>Hedef: {chg.target_value}</span>
+                  <span className="text-emerald-400 font-medium">{chg.members.length} Katılımcı</span>
                 </div>
               </Link>
             ))}
@@ -170,14 +164,14 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Social Activity Feed Section */}
+      {/* Main Feed Section */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-extrabold text-white flex items-center gap-2">
+          <h2 className="text-sm font-bold text-slate-300 flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-400" />
-            <span>Arkadaşlarından</span>
+            <span>Topluluk Akışı</span>
           </h2>
-          <span className="text-xs text-slate-400">{workouts.length} antrenman</span>
+          <span className="text-xs text-slate-400">{workouts.length} Antrenman</span>
         </div>
 
         {workouts.length === 0 ? (
@@ -191,11 +185,23 @@ export default function HomePage() {
         ) : (
           <div className="space-y-4">
             {workouts.map((workout) => (
-              <WorkoutCard key={workout.id} workout={workout} />
+              <WorkoutCard
+                key={workout.id}
+                workout={workout}
+                onDelete={(id) => setWorkouts((prev) => prev.filter((w) => w.id !== id))}
+              />
             ))}
           </div>
         )}
       </section>
     </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <ProtectedRoute>
+      <HomePageContent />
+    </ProtectedRoute>
   )
 }
