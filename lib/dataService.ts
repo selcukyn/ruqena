@@ -746,6 +746,24 @@ class DataService {
   }
 
   // --- WEB PUSH SUBSCRIPTIONS ---
+  async checkPushSubscription(userId: string, endpoint: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return false
+    
+    const { data, error } = await supabase
+      .from('push_subscriptions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('endpoint', endpoint)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') return false // PGRST116 is "no rows returned"
+      return false
+    }
+
+    return !!data
+  }
+
   async savePushSubscription(userId: string, subscription: PushSubscription): Promise<void> {
     if (isSupabaseConfigured && supabase) {
       const subJSON = subscription.toJSON()

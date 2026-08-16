@@ -32,18 +32,22 @@ function NotificationsPageContent() {
 
     // Check actual browser notification permission on mount
     if (typeof window !== 'undefined' && 'Notification' in window) {
-      setPushStatus(Notification.permission)
-      
-      // Verify actual subscription
       if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then((reg) => {
+        // Register SW to ensure it's available, then check subscription
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
           reg.pushManager.getSubscription().then((sub) => {
-            if (!sub) {
-              // If granted but no subscription, reset UI to prompt again
+            if (sub && user?.id) {
+              // Verify with DB
+              dataService.checkPushSubscription(user.id, sub.endpoint).then((isValid) => {
+                setPushStatus(isValid ? 'granted' : 'default')
+              }).catch(() => setPushStatus('default'))
+            } else {
               setPushStatus('default')
             }
-          }).catch(console.error)
-        }).catch(console.error)
+          }).catch(() => setPushStatus('default'))
+        }).catch(() => setPushStatus('default'))
+      } else {
+        setPushStatus(Notification.permission)
       }
     }
   }, [user?.id])
@@ -76,7 +80,6 @@ function NotificationsPageContent() {
 
       try {
         const perm = await Notification.requestPermission()
-        setPushStatus(perm)
         
         if (perm === 'granted' && user?.id) {
           const reg = await navigator.serviceWorker.register('/sw.js')
@@ -96,10 +99,16 @@ function NotificationsPageContent() {
           }
           
           await dataService.savePushSubscription(user.id, sub)
+          // Sadece her şey başarılı olduktan sonra "Etkinleştirildi" durumuna geç.
+          setPushStatus('granted')
+        } else {
+          setPushStatus(perm)
         }
       } catch (err: any) {
         console.error('Push aboneliği hatası:', err)
         alert('Bildirim aboneliği oluşturulurken bir hata oluştu: ' + err.message)
+        // Brave'deki gibi hatalarda butonu eski haline (Açık görünümünden) kurtar
+        setPushStatus('default')
       }
     } else {
       alert('Tarayıcınız bildirimleri desteklemiyor.')
