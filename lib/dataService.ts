@@ -37,7 +37,14 @@ class DataService {
           message,
           url
         })
-      }).catch(err => console.error('Push notification failed:', err))
+      })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.text()
+          console.error(`Push API HTTP Error (${res.status}):`, errData)
+        }
+      })
+      .catch(err => console.error('Push API Network/Fetch failed:', err))
     } catch (err) {
       console.error('Error triggering push notification:', err)
     }

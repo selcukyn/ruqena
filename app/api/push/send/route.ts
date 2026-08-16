@@ -74,29 +74,56 @@ export async function POST(req: Request) {
       url: url || '/notifications'
     })
 
-    const sendPromises = subscriptions.map(async (sub) => {
-      const pushSubscription = {
-        endpoint: sub.endpoint,
-        keys: {
-          p256dh: sub.p256dh,
-          auth: sub.auth
+    const results = await Promise.all(
+      subscriptions.map(async (sub) => {
+        const pushSubscription = {
+          endpoint: sub.endpoint,
+          keys: {
+            p256dh: sub.p256dh,
+            auth: sub.auth
+          }
         }
-      }
 
-      try {
-        await webpush.sendNotification(pushSubscription, payload)
-      } catch (err: any) {
-        console.error('Push send error:', err)
-        // If the subscription is invalid or gone, remove it from DB
-        if (err.statusCode === 404 || err.statusCode === 410) {
-          await supabaseAdmin.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+        try {
+          await webpush.sendNotification(pushSubscription, payload)
+          return { success: true }
+        } catch (err: any) {
+          console.error('Push send error:', err)
+          if (err.statusCode === 404 || err.statusCode === 410) {
+            await supabaseAdmin.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+          }
+          return {
+            success: false,
+            statusCode: err.statusCode || 500,
+            errorName: err.name || 'UnknownError'
+          }
         }
+      })
+    )
+
+    const successes = results.filter(r => r.success).length
+    const failures = results.length - successes
+
+    if (failures > 0) {
+      const errorDetails = results.filter(r => !r.success).map(r => ({
+        statusCode: r.statusCode,
+        error: r.errorName
+      }))
+
+      if (successes === 0) {
+        return NextResponse.json(
+          { error: 'All push notifications failed', details: errorDetails },
+          { status: 500 }
+        )
+      } else {
+        return NextResponse.json(
+          { success: true, partial: true, message: 'Some push notifications failed', details: errorDetails },
+          { status: 207 }
+        )
       }
-    })
+    }
 
-    await Promise.all(sendPromises)
-
-    return NextResponse.json({ success: true, message: 'Push notifications processed' })
+    return NextResponse.json({ success: true, message: 'All push notifications sent successfully' })
   } catch (error: any) {
     console.error('Unexpected error in push route:', error)
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })

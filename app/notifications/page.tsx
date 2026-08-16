@@ -79,6 +79,21 @@ function NotificationsPageContent() {
       }
 
       try {
+        if (pushStatus === 'granted') {
+          // Kapatma / Disable akışı
+          const reg = await navigator.serviceWorker.ready
+          const sub = await reg.pushManager.getSubscription()
+          if (sub) {
+            await sub.unsubscribe()
+            if (user?.id) {
+              await dataService.deletePushSubscription(sub.endpoint)
+            }
+          }
+          setPushStatus('default')
+          return
+        }
+
+        // Açma / Enable akışı
         const perm = await Notification.requestPermission()
         
         if (perm === 'granted' && user?.id) {
@@ -106,9 +121,9 @@ function NotificationsPageContent() {
         }
       } catch (err: any) {
         console.error('Push aboneliği hatası:', err)
-        alert('Bildirim aboneliği oluşturulurken bir hata oluştu: ' + err.message)
-        // Brave'deki gibi hatalarda butonu eski haline (Açık görünümünden) kurtar
-        setPushStatus('default')
+        alert('İşlem sırasında bir hata oluştu: ' + err.message)
+        // Hata durumunda UI'ı eski güvenli haline getir (Brave hatası vb. durumlar için)
+        setPushStatus((prev) => prev === 'granted' ? 'granted' : 'default')
       }
     } else {
       alert('Tarayıcınız bildirimleri desteklemiyor.')
