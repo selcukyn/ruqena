@@ -60,7 +60,12 @@ export async function POST(req: Request) {
       .eq('user_id', receiverId)
 
     if (error) {
-      console.error('Error fetching subscriptions:', error)
+      console.error('DB Error Detail:', JSON.stringify({
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      }))
       return NextResponse.json({ error: 'Database error' }, { status: 500 })
     }
 
