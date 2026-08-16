@@ -25,6 +25,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Supabase service configuration missing' }, { status: 500 })
     }
 
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Verify the caller is an authenticated user
+    const supabaseUser = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false }
+    })
+    
+    const { data: { user } } = await supabaseUser.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const body = await req.json()
     const { receiverId, title, message, url } = body
 
@@ -32,6 +48,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 })
     }
 
+    // Use admin client ONLY to fetch the receiver's push subscriptions (bypassing RLS)
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false }
     })

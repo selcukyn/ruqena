@@ -17,6 +17,32 @@ class DataService {
   private localNotifications: AppNotification[] = SEED_NOTIFICATIONS
   private localCurrentUserId: string = 'usr_me'
 
+  // --- WEB PUSH HELPER ---
+  private async triggerPushNotification(receiverId: string, title: string, message: string, url?: string): Promise<void> {
+    try {
+      if (!isSupabaseConfigured || !supabase) return
+      const session = (await supabase.auth.getSession()).data?.session
+      if (!session) return
+
+      // Best-effort push: do not block the main execution flow
+      fetch('/api/push/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          receiverId,
+          title,
+          message,
+          url
+        })
+      }).catch(err => console.error('Push notification failed:', err))
+    } catch (err) {
+      console.error('Error triggering push notification:', err)
+    }
+  }
+
   // --- PROFILES ---
   async getCurrentProfile(userId?: string): Promise<Profile | null> {
     if (isSupabaseConfigured && supabase) {
@@ -349,6 +375,14 @@ class DataService {
         p_receiver_id: receiverId,
       })
       if (error) throw new Error(error.message)
+      
+      // Trigger Web Push Notification
+      this.triggerPushNotification(
+        receiverId,
+        'Yeni Arkadaşlık İsteği 👥',
+        'Sana bir arkadaşlık isteği gönderildi.',
+        '/friends'
+      )
       return
     }
   }
@@ -563,6 +597,14 @@ class DataService {
         p_invitee_id: inviteeId,
       })
       if (error) throw new Error(error.message)
+
+      // Trigger Web Push Notification
+      this.triggerPushNotification(
+        inviteeId,
+        'Yeni Challenge Daveti ⚔️',
+        "Bir arkadaşın seni challenge'a davet etti!",
+        `/challenges/${challengeId}`
+      )
     }
   }
 
