@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Flame, Trophy, ChevronRight, Activity, Sparkles, TrendingUp } from 'lucide-react'
+import { Plus, Flame, Trophy, ChevronRight, Activity, Sparkles, TrendingUp, LogOut } from 'lucide-react'
 import { dataService } from '@/lib/dataService'
 import { EnrichedWorkout, EnrichedChallenge } from '@/types/app'
 import { WorkoutCard } from '@/components/feed/WorkoutCard'
@@ -14,10 +14,24 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
 function HomePageContent() {
   const router = useRouter()
-  const { profile: user } = useAuth()
+  const { profile: user, signOut } = useAuth()
   const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])
   const [challenges, setChallenges] = useState<EnrichedChallenge[]>([])
   const [dataLoading, setDataLoading] = useState(true)
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  const handleLogout = async () => {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await signOut()
+      window.location.href = '/login'
+    } catch (err) {
+      console.error('Logout error:', err)
+      alert('Çıkış yapılırken bir sorun oluştu. Lütfen tekrar deneyin.')
+      setLoggingOut(false)
+    }
+  }
 
   useEffect(() => {
     let isMounted = true
@@ -64,27 +78,40 @@ function HomePageContent() {
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-[#121826] to-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl">
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">
+        <div className="relative z-10 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
               <span>Hoş Geldin, {user?.display_name || 'Sporcu'}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Bugün ne çalışıyoruz? 💪
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md">
-              {motivationalMsg}
-            </p>
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold hover:bg-rose-500/20 transition-colors disabled:opacity-50 shrink-0"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{loggingOut ? 'Çıkış...' : 'Çıkış Yap'}</span>
+            </button>
           </div>
 
-          <Link
-            href="/workouts/new"
-            className="self-start sm:self-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
-          >
-            <Plus className="w-5 h-5 stroke-[2.5]" />
-            <span>Antrenman Ekle</span>
-          </Link>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                Bugün ne çalışıyoruz? 💪
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md">
+                {motivationalMsg}
+              </p>
+            </div>
+
+            <Link
+              href="/workouts/new"
+              className="self-start sm:self-auto shrink-0 px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+              <span>Antrenman Ekle</span>
+            </Link>
+          </div>
         </div>
 
         {/* Stats Strip */}
