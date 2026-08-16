@@ -702,6 +702,39 @@ class DataService {
     }
     return []
   }
+
+  // --- WEB PUSH SUBSCRIPTIONS ---
+  async savePushSubscription(userId: string, subscription: PushSubscription): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const subJSON = subscription.toJSON()
+      const endpoint = subJSON.endpoint
+      const p256dh = subJSON.keys?.p256dh
+      const auth = subJSON.keys?.auth
+
+      if (!endpoint || !p256dh || !auth) throw new Error('Geçersiz PushSubscription verisi')
+
+      // Since endpoint is UNIQUE, we use upsert or handle conflicts.
+      // But we just use upsert based on endpoint. Wait, Supabase JS upsert needs conflict constraint.
+      // Let's just delete the old one by endpoint if it exists, then insert.
+      await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint)
+      
+      const { error } = await supabase.from('push_subscriptions').insert({
+        user_id: userId,
+        endpoint,
+        p256dh,
+        auth
+      })
+
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  async deletePushSubscription(endpoint: string): Promise<void> {
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint)
+      if (error) throw new Error(error.message)
+    }
+  }
 }
 
 export const dataService = new DataService()

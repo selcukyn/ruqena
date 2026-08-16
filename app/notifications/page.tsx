@@ -9,14 +9,42 @@ import { useEffect } from 'react'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i)
+  }
+  return outputArray
+}
+
 function NotificationsPageContent() {
   const { user } = useAuth()
   const [notifications, setNotifications] = useState<AppNotification[]>([])
-  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushStatus, setPushStatus] = useState<NotificationPermission | 'default'>('default')
 
   useEffect(() => {
     if (user?.id) {
       dataService.getNotifications(user.id).then(setNotifications)
+    }
+
+    // Check actual browser notification permission on mount
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPushStatus(Notification.permission)
+      
+      // Verify actual subscription
+      if (Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.pushManager.getSubscription().then((sub) => {
+            if (!sub) {
+              // If granted but no subscription, reset UI to prompt again
+              setPushStatus('default')
+            }
+          }).catch(console.error)
+        }).catch(console.error)
+      }
     }
   }, [user?.id])
 
@@ -39,15 +67,42 @@ function NotificationsPageContent() {
     }
   }
 
-  const handleTogglePush = () => {
-    if ('Notification' in window) {
-      Notification.requestPermission().then((perm) => {
-        if (perm === 'granted') {
-          setPushEnabled(true)
+  const handleTogglePush = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator) {
+      if (Notification.permission === 'denied') {
+        alert('Bildirimler tarayıcı ayarlarından engellenmiş. Lütfen tarayıcı ayarlarından izin verin.')
+        return
+      }
+
+      try {
+        const perm = await Notification.requestPermission()
+        setPushStatus(perm)
+        
+        if (perm === 'granted' && user?.id) {
+          const reg = await navigator.serviceWorker.register('/sw.js')
+          await navigator.serviceWorker.ready
+          
+          let sub = await reg.pushManager.getSubscription()
+          if (!sub) {
+            const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+            if (!vapidKey) {
+              console.warn('VAPID public key eksik, abonelik oluşturulamıyor.')
+              return
+            }
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(vapidKey)
+            })
+          }
+          
+          await dataService.savePushSubscription(user.id, sub)
         }
-      })
+      } catch (err: any) {
+        console.error('Push aboneliği hatası:', err)
+        alert('Bildirim aboneliği oluşturulurken bir hata oluştu: ' + err.message)
+      }
     } else {
-      setPushEnabled(!pushEnabled)
+      alert('Tarayıcınız bildirimleri desteklemiyor.')
     }
   }
 
@@ -109,13 +164,16 @@ function NotificationsPageContent() {
 
         <button
           onClick={handleTogglePush}
+          disabled={pushStatus === 'denied'}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-            pushEnabled
+            pushStatus === 'granted'
               ? 'bg-emerald-500 text-slate-950'
-              : 'bg-slate-800 text-slate-300 border border-slate-700'
+              : pushStatus === 'denied'
+              ? 'bg-red-500/10 text-red-400 border border-red-500/20 opacity-60 cursor-not-allowed'
+              : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
           }`}
         >
-          {pushEnabled ? 'Açık ✓' : 'Etkinleştir'}
+          {pushStatus === 'granted' ? 'Açık ✓' : pushStatus === 'denied' ? 'Engellendi' : 'Etkinleştir'}
         </button>
       </div>
 
