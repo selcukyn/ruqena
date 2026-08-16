@@ -13,10 +13,19 @@ export function Header() {
   const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
-    if (authUser?.id) {
-      dataService.getNotifications(authUser.id).then((notifs) => {
-        setUnreadCount(notifs.filter((n) => !n.is_read).length)
-      })
+    const fetchNotifications = () => {
+      if (authUser?.id) {
+        dataService.getNotifications(authUser.id).then((notifs) => {
+          setUnreadCount(notifs.filter((n) => !n.is_read).length)
+        })
+      }
+    }
+
+    fetchNotifications()
+
+    window.addEventListener('notificationsRead', fetchNotifications)
+    return () => {
+      window.removeEventListener('notificationsRead', fetchNotifications)
     }
   }, [authUser?.id])
 

@@ -429,7 +429,7 @@ class DataService {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from('friend_requests')
-        .select('*')
+        .select('*, sender:profiles!friend_requests_sender_id_fkey(*), receiver:profiles!friend_requests_receiver_id_fkey(*)')
         .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
 
       if (error) throw new Error(error.message)

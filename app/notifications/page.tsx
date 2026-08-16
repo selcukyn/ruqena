@@ -6,6 +6,7 @@ import { dataService } from '@/lib/dataService'
 import { AppNotification } from '@/types/database'
 
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
@@ -22,6 +23,7 @@ function urlBase64ToUint8Array(base64String: string) {
 
 function NotificationsPageContent() {
   const { user } = useAuth()
+  const router = useRouter()
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [pushStatus, setPushStatus] = useState<NotificationPermission | 'default'>('default')
 
@@ -56,6 +58,7 @@ function NotificationsPageContent() {
     if (!user) return
     await dataService.markAllNotificationsAsRead(user.id)
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+    window.dispatchEvent(new Event('notificationsRead'))
   }
 
   const handleRespondChallenge = async (notifId: string, status: 'accepted' | 'rejected') => {
@@ -66,8 +69,22 @@ function NotificationsPageContent() {
           n.id === notifId ? { ...n, action_status: status, is_read: true } : n
         )
       )
+      window.dispatchEvent(new Event('notificationsRead'))
     } catch (error: any) {
       alert('İşlem başarısız: ' + error.message)
+    }
+  }
+
+  const handleNotificationClick = async (notif: AppNotification) => {
+    try {
+      if (!notif.is_read) {
+        await dataService.markNotificationAsRead(notif.id)
+        setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n)))
+        window.dispatchEvent(new Event('notificationsRead'))
+      }
+      // Bildirim yönlendirmesi (navigation) istenmediği için kaldırıldı.
+    } catch (err) {
+      console.error("Bildirim okundu işaretlenirken hata:", err)
     }
   }
 
@@ -211,7 +228,8 @@ function NotificationsPageContent() {
           notifications.map((notif) => (
             <div
               key={notif.id}
-              className={`glass-card rounded-2xl p-4 border flex items-start gap-3.5 transition-all ${
+              onClick={() => handleNotificationClick(notif)}
+              className={`glass-card rounded-2xl p-4 border flex items-start gap-3.5 transition-all cursor-pointer ${
                 !notif.is_read
                   ? 'border-emerald-500/30 bg-emerald-500/5 shadow-md'
                   : 'border-slate-800/80 opacity-80'

@@ -13,7 +13,8 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
 function UserProfilePageContent() {
   const params = useParams()
-  const username = params?.username as string
+  const rawUsername = params?.username as string
+  const username = rawUsername ? decodeURIComponent(rawUsername) : ''
   const { user: currentUser } = useAuth()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [workouts, setWorkouts] = useState<EnrichedWorkout[]>([])

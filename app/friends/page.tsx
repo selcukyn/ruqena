@@ -32,28 +32,12 @@ function FriendsPageContent() {
       setFriends(f)
       setOutgoingRequestUserIds(reqs.outgoing.map((r) => r.receiver_id))
 
-      // Transform incoming requests to format with profile data
-      const incomingMapped = await Promise.all(
-        reqs.incoming.map(async (r) => {
-          const senderProfile = await dataService.getCurrentProfile(r.sender_id)
-          return {
-            id: r.id,
-            user: senderProfile || {
-              id: r.sender_id,
-              username: 'user',
-              display_name: 'Sporcu',
-              avatar_url: null,
-              bio: null,
-              weekly_goal: 3,
-              current_streak: 0,
-              longest_streak: 0,
-              total_xp: 0,
-              created_at: r.created_at,
-              updated_at: r.created_at,
-            },
-          }
-        })
-      )
+      const incomingMapped = reqs.incoming
+        .filter((r: any) => r.sender)
+        .map((r: any) => ({
+          id: r.id,
+          user: r.sender,
+        }))
       setIncomingRequests(incomingMapped)
     } catch (err) {
       console.error(err)
